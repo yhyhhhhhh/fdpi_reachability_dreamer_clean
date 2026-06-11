@@ -1,0 +1,60 @@
+{
+  "status": "completed",
+  "date": "2026-06-11",
+  "measurement_scope": "warmup 后 131072 env steps 的 rollout + update，不含 checkpoint I/O",
+  "warmup_env_steps": 32768,
+  "measured_env_steps": 131072,
+  "hardware": "NVIDIA GeForce RTX 4090, 24564 MiB, driver 580.126.09",
+  "results": {
+    "baseline": {
+      "num_envs": 64,
+      "batch_size": 64,
+      "env_steps_per_second": 213.4857735043707,
+      "measured_seconds": 613.9612857964821,
+      "sample_batch_seconds": 112.12702664081007,
+      "world_model_update_seconds": 136.6101755592972,
+      "actor_critic_update_seconds": 267.72775337984785,
+      "sample_plus_update_seconds": 516.4649555799551,
+      "gpu_utilization_mean_percent": 40.825783972125436,
+      "gpu_memory_used_max_mib": 8134.0,
+      "estimated_1m_minutes": 78.06921460424832,
+      "estimated_10m_hours": 13.011535767374719,
+      "metrics_path": "对比结果/baseline/指标结果.json"
+    },
+    "balanced": {
+      "num_envs": 128,
+      "batch_size": 128,
+      "env_steps_per_second": 520.8873741108087,
+      "measured_seconds": 251.6321310796775,
+      "sample_batch_seconds": 61.48997159395367,
+      "world_model_update_seconds": 58.43090101471171,
+      "actor_critic_update_seconds": 84.4164605224505,
+      "sample_plus_update_seconds": 204.33733313111588,
+      "speedup_vs_baseline_env_steps_per_second": 2.439916091646006,
+      "speedup_vs_baseline_sample_plus_update": 2.5275114814606994,
+      "gpu_utilization_mean_percent": 50.233050847457626,
+      "gpu_memory_used_max_mib": 10494.0,
+      "estimated_1m_minutes": 31.99668007910124,
+      "estimated_10m_hours": 5.33278001318354,
+      "metrics_path": "对比结果/balanced/指标结果.json"
+    },
+    "fast": {
+      "num_envs": 128,
+      "batch_size": 256,
+      "env_steps_per_second": 659.8066089280095,
+      "measured_seconds": 198.6521478057839,
+      "sample_batch_seconds": 31.250143234618008,
+      "world_model_update_seconds": 54.414447501301765,
+      "actor_critic_update_seconds": 66.28846728103235,
+      "sample_plus_update_seconds": 151.95305801695213,
+      "speedup_vs_baseline_env_steps_per_second": 3.0906350249821273,
+      "speedup_vs_baseline_sample_plus_update": 3.398845421869282,
+      "gpu_utilization_mean_percent": 64.67914438502673,
+      "gpu_memory_used_max_mib": 15214.0,
+      "estimated_1m_minutes": 25.259926834841906,
+      "estimated_10m_hours": 4.209987805806985,
+      "metrics_path": "对比结果/fast/指标结果.json"
+    }
+  },
+  "conclusion": "fast 在 warmup 后带更新阶段约为 baseline 的 3.09x 总吞吐，采样+更新相关耗时约 3.40x 加速；但后续 W&B 观察显示 fast 接近 4M env steps 仍未学会夹取，策略更新强度过弱。fast 应作为吞吐上限参考，后续优先测试 configs/reachability_gp_isaaclab22_4090_policy_recovery.yaml。"
+}

@@ -1,0 +1,22 @@
+本工作区当前不是 git 仓库，无法自动生成 `git diff` 格式补丁。
+
+本实验相关代码与配置变更：
+
+- `fdpi_reachability_dreamer_isaaclab22/replay_buffer.py`
+  - 将 world model / replay safety-critical 采样从按单个 env 的 `per_env_batch` 取整，改为按全 batch 统一分配 safety 配额。
+  - 目标是让 `BatchSize == NumEnvs` 时 `SafetyCriticalRatio=0.50` 仍能真实产生约一半 safety-critical 序列。
+
+- `tests/test_isaaclab22_package.py`
+  - 新增 `test_fdpi_replay_safety_ratio_uses_full_batch_budget`，覆盖 `per_env_batch=1` 时全 batch safety 配额应为 50% 的行为。
+
+- `configs/reachability_gp_isaaclab22_wm_safety50.yaml`
+  - 新增 50% uniform + 50% safety-critical world model 采样实验配置。
+
+- `configs/reachability_gp_isaaclab22_4090_fast_wm_safety50.yaml`
+  - 新增 4090 fast 基座版本的 safety50 配置，继承 `configs/reachability_gp_isaaclab22_4090_fast.yaml`，仅覆盖 world model safety-critical 采样比例。
+
+- `experiments/2026-06-11_危险区域世界模型50比50采样/`
+  - 新增实验运行命令、配置、参数说明、实验清单、实验记录和配置快照。
+  - 运行入口已改为默认使用 `configs/reachability_gp_isaaclab22_4090_fast_wm_safety50.yaml`。
+  - 误用 baseline 基座的 `wm_safety50_long_20260611_175544` 已停止，并记录为中止 run。
+  - 新 fast run 为 `wm_safety50_fast_20260611_192255`。

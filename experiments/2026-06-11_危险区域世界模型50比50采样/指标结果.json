@@ -1,0 +1,11 @@
+{
+  "status": "stopped",
+  "stopped_at": "2026-06-11 21:34:08 CST",
+  "reason": "4090 fast 策略学习偏弱，接近 4M env steps 仍未学会夹取；已切换到 policy recovery 长训。",
+  "stopped_run": {
+    "run_id": "wm_safety50_fast_20260611_192255",
+    "wandb_run": "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/n60y55jj",
+    "log": "experiments/2026-06-11_危险区域世界模型50比50采样/日志/tmux训练_fast_20260611_192255.log",
+    "checkpoint_dir": "experiments/2026-06-11_危险区域世界模型50比50采样/检查点/fdpi-4090fast-wm-safety50/wm_safety50_fast_20260611_192255"
+  }
+}

@@ -1,0 +1,4 @@
+BaseConfig: 配置.yaml
+
+实验:
+  输出目录: experiments/2026-06-11_4090训练加速参数对比/对比结果/fast

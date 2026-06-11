@@ -1,0 +1,38 @@
+{
+  "status": "running_after_restart",
+  "created_at": "2026-06-11 21:34:08 CST",
+  "started_at": "2026-06-11 21:39:21 CST",
+  "stopped_at": "2026-06-11 21:43:29 CST",
+  "experiment": "4090策略更新强度恢复验证",
+  "config": "configs/reachability_gp_isaaclab22_4090_policy_recovery.yaml",
+  "sample_max_steps": 10000000,
+  "tmux_session": "policy_recovery_long",
+  "run_id": "policy_recovery_20260611_213921",
+  "wandb_run_id": "2hceqcms",
+  "wandb_run_url": "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/2hceqcms",
+  "log": "experiments/2026-06-11_4090策略更新强度恢复验证/日志/tmux训练_policy_recovery_20260611_213921.log",
+  "checkpoint_dir": "experiments/2026-06-11_4090策略更新强度恢复验证/检查点/fdpi-4090-policy-recovery/policy_recovery_20260611_213921",
+  "startup_check": {
+    "isaaclab_env_created": true,
+    "num_envs": 128,
+    "progress_bar_started": true,
+    "gpu_memory_used_mb": 15182,
+    "gpu_utilization_percent": 68
+  },
+  "stop_check": {
+    "tmux_session_exists": false,
+    "training_process_exists": false,
+    "gpu_memory_used_mb": 58,
+    "traceback_found": false,
+    "train_exit_status_found": false,
+    "last_progress_vectorized_step": 827,
+    "approx_env_steps": 105856,
+    "saved_checkpoints": ["step_0"]
+  },
+  "notes": [
+    "用户观察 fast 接近 4M env steps 仍未学会夹取，原训练约 1M 已学会夹取。",
+    "本实验恢复策略与风险 critic 更新强度，验证夹取学习是否恢复。",
+    "首次 run policy_recovery_20260611_213921 在约 105k env steps 异常停止且无 traceback。",
+    "已增强异常/信号/退出码诊断，并重启 run policy_recovery_diag_20260611_215744。"
+  ]
+}

@@ -1,0 +1,47 @@
+实验:
+  名称: 4090策略更新强度恢复验证
+  日期: 2026-06-11
+  目的: 验证在保留 4090 吞吐优化的同时恢复策略与风险 critic 更新强度后，夹取学习是否能从 fast 模式的弱学习状态恢复。
+  主配置: configs/reachability_gp_isaaclab22_4090_policy_recovery.yaml
+  输出目录: experiments/2026-06-11_4090策略更新强度恢复验证/检查点
+
+运行:
+  入口: bash experiments/2026-06-11_4090策略更新强度恢复验证/运行命令.sh
+  训练脚本: scripts/train.sh
+  默认环境: SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1
+  默认设备: cuda:0
+  wandb_mode: online
+
+训练:
+  SampleMaxSteps: 10000000
+  NumEnvs: 128
+  BatchSize: 256
+  BatchLength: 64
+  ImagineBatchSize: 256
+  ImagineContext: 16
+  ImagineHorizon: 15
+  TrainModelEverySteps: 512
+  TrainAgentEverySteps: 512
+  ModelUpdate: 2
+  AgentUpdate: 4
+  SaveEverySteps: 1000000
+
+风险与对偶更新:
+  Gp.UpdateSteps: 2
+  Gd.UpdateSteps: 2
+  DualUpdate.UpdateSteps: 2
+
+性能:
+  UseAmp: true
+  AllowTF32: true
+  MatmulPrecision: high
+  LogEverySteps: 4096
+  DetailedLogEverySteps: 8192
+  TimingLogEverySteps: 8192
+  CacheReplayStarts: true
+
+对照:
+  baseline_agent_updates_per_1024_env_steps: 16
+  fast_agent_updates_per_1024_env_steps: 2
+  policy_recovery_agent_updates_per_1024_env_steps: 8
+  说明: policy recovery 的策略更新密度介于 baseline 与 fast 之间，优先验证 fast 模式策略学习偏弱的问题能否缓解。

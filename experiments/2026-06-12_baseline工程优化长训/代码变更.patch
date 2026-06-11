@@ -1,0 +1,24 @@
+当前工作区未提供可用 git diff，本文件记录本次实验入口变更摘要。
+
+配置：
+- 新增 `configs/reachability_gp_isaaclab22_baseline_engineering.yaml`。
+- 该配置继承 `configs/reachability_gp_isaaclab22.yaml`，显式保持 baseline 训练参数：
+  - `NumEnvs=64`
+  - `BatchSize=64`
+  - `ImagineBatchSize=64`
+  - `TrainModelEverySteps=256`
+  - `TrainAgentEverySteps=256`
+  - `ModelUpdate=4`
+  - `AgentUpdate=4`
+  - `Gp/Gd/Dual UpdateSteps=2`
+- 同时启用工程优化：
+  - TF32 / `MatmulPrecision=high`
+  - 低频日志与 timing
+  - replay starts cache
+  - `UseSampleMany`
+  - `UseBatchedCriticLatentEncoding`
+  - 低频 FDPI 梯度诊断
+
+实验归档：
+- 新增 `experiments/2026-06-12_baseline工程优化长训/`。
+- 新增 `运行命令.sh`、`启动tmux长训.sh`、`配置.yaml`、`参数说明.md`、`实验清单.yaml`、`实验记录.md`、`指标结果.json`。

@@ -1,0 +1,41 @@
+BaseConfig: reachability_gp_isaaclab22.yaml
+
+BasicSettings:
+  UseAmp: true
+
+JointTrainAgent:
+  NumEnvs: 128
+  BatchSize: 256
+  BatchLength: 64
+  ImagineBatchSize: 256
+  ImagineContext: 16
+  ImagineHorizon: 15
+  TrainModelEverySteps: 512
+  TrainAgentEverySteps: 512
+  ModelUpdate: 2
+  AgentUpdate: 4
+  SaveEverySteps: 1000000
+
+Wandb:
+  Name: "FDPI-reachability-gp-IsaacLab22-SurgicalRobot5-4090-policy-recovery"
+
+Env:
+  MakeKwargs:
+    num_envs: 128
+    use_fabric: True
+
+FDPIRegimeDreamer:
+  Gp:
+    UpdateSteps: 2
+  Gd:
+    UpdateSteps: 2
+  DualUpdate:
+    UpdateSteps: 2
+  Performance:
+    AllowTF32: true
+    MatmulPrecision: "high"
+    CudnnBenchmark: false
+    LogEverySteps: 4096
+    DetailedLogEverySteps: 8192
+    TimingLogEverySteps: 8192
+    CacheReplayStarts: true

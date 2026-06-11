@@ -1,0 +1,53 @@
+实验:
+  名称: baseline工程优化长训
+  日期: 2026-06-12
+  目的: 在保持 baseline 更新密度与 batch/env 参数的前提下，只启用工程性能优化，验证旧 baseline 学习能力是否恢复。
+  主配置: configs/reachability_gp_isaaclab22_baseline_engineering.yaml
+  输出目录: experiments/2026-06-12_baseline工程优化长训/检查点
+
+运行:
+  入口: bash experiments/2026-06-12_baseline工程优化长训/运行命令.sh
+  tmux入口: bash experiments/2026-06-12_baseline工程优化长训/启动tmux长训.sh
+  训练脚本: scripts/train.sh
+  默认环境: SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1
+  默认设备: cuda:0
+  wandb_mode: online
+
+训练:
+  SampleMaxSteps: 10000000
+  NumEnvs: 64
+  BatchSize: 64
+  BatchLength: 64
+  ImagineBatchSize: 64
+  ImagineContext: 16
+  ImagineHorizon: 15
+  TrainModelEverySteps: 256
+  TrainAgentEverySteps: 256
+  ModelUpdate: 4
+  AgentUpdate: 4
+  SaveEverySteps: 1000000
+
+风险与对偶更新:
+  Gp.UpdateSteps: 2
+  Gd.UpdateSteps: 2
+  DualUpdate.UpdateSteps: 2
+
+性能:
+  UseAmp: true
+  AllowTF32: true
+  MatmulPrecision: high
+  LogEverySteps: 4096
+  DetailedLogEverySteps: 8192
+  TimingLogEverySteps: 8192
+  CacheReplayStarts: true
+  UseSampleMany: true
+  UseBatchedCriticLatentEncoding: true
+  BatchedLatentEncodeMaxBatch: 1024
+  FDPIGradDiagnosticsEverySteps: 65536
+
+对照:
+  baseline_agent_updates_per_1024_env_steps: 16
+  fast_agent_updates_per_1024_env_steps: 2
+  policy_recovery_agent_updates_per_1024_env_steps: 8
+  本实验_agent_updates_per_1024_env_steps: 16
+  说明: 本实验恢复 baseline 的 optimizer step 密度，只保留不应改变损失目标的工程优化。

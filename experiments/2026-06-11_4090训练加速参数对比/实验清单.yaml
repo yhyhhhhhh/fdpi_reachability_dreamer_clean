@@ -1,0 +1,23 @@
+experiment_id: 2026-06-11_4090训练加速参数对比
+experiment_name: 4090训练加速参数对比
+date: 2026-06-11
+purpose: 对比 baseline、4090 balanced、4090 fast 三组训练参数下的吞吐、更新耗时和 GPU 利用率。
+command: bash experiments/2026-06-11_4090训练加速参数对比/运行命令.sh
+all_compare_command: bash experiments/2026-06-11_4090训练加速参数对比/运行全部对比.sh
+config: experiments/2026-06-11_4090训练加速参数对比/配置.yaml
+compare_configs:
+  baseline: experiments/2026-06-11_4090训练加速参数对比/配置_baseline.yaml
+  balanced: experiments/2026-06-11_4090训练加速参数对比/配置_balanced.yaml
+  fast: experiments/2026-06-11_4090训练加速参数对比/配置_fast.yaml
+parameter_note: experiments/2026-06-11_4090训练加速参数对比/参数说明.md
+config_snapshots:
+  - experiments/2026-06-11_4090训练加速参数对比/配置快照/
+compare_outputs:
+  baseline: experiments/2026-06-11_4090训练加速参数对比/对比结果/baseline
+  balanced: experiments/2026-06-11_4090训练加速参数对比/对比结果/balanced
+  fast: experiments/2026-06-11_4090训练加速参数对比/对比结果/fast
+logs:
+  - experiments/2026-06-11_4090训练加速参数对比/日志/
+metrics: experiments/2026-06-11_4090训练加速参数对比/指标结果.json
+status: 已完成
+result: warmup 后带更新测量完成；fast 总吞吐 659.81 env steps/s，是 baseline 213.49 env steps/s 的 3.09x；采样+更新相关耗时从 516.46s 降到 151.95s，约 3.40x 加速；10M env steps 估算约 4.21 小时。

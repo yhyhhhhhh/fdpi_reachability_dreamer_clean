@@ -1,0 +1,16 @@
+无法生成 git diff: Command '['git', 'diff', '--', 'fdpi_reachability_dreamer_isaaclab22', 'configs', 'scripts', '/root/gpufree-data/fdpi_reachability_dreamer_clean/experiments/2026-06-11_4090训练加速参数对比/对比结果/fast', 'docs/research', 'README.md']' returned non-zero exit status 129.
+
+当前工作区未提供可用 git diff 时，本文件作为变更摘要记录。
+本次 4090 加速改动涉及：
+- configs/reachability_gp_isaaclab22_4090_fast.yaml
+- configs/reachability_gp_isaaclab22_4090_balanced.yaml
+- fdpi_reachability_dreamer_isaaclab22/train.py
+- fdpi_reachability_dreamer_isaaclab22/trainer.py
+- fdpi_reachability_dreamer_isaaclab22/replay_buffer.py
+- scripts/train.sh
+- scripts/profiling/benchmark_training_speed.py
+- experiments/2026-06-11_4090训练加速参数对比/
+- README.md
+- docs/research/CHANGELOG.md
+- docs/research/EXPERIMENT_INDEX.md
+- docs/research/PROJECT_STATE.md

@@ -1,0 +1,47 @@
+{
+  "status": "completed",
+  "date": "2026-06-11",
+  "remote_host": "fdpi-1",
+  "remote_project_root": "/root/gpufree-data/fdpi_reachability_dreamer_clean",
+  "remote_surgical_robot5_root": "/root/gpufree-data/surgical_robot5",
+  "isaaclab_root": "/root/IsaacLab",
+  "isaaclab_version": "2.2.1",
+  "isaacsim_version": "5.0",
+  "conda_env": "isaaclab",
+  "gpu": "NVIDIA GeForce RTX 4090 24GB",
+  "task": "SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1",
+  "checks": {
+    "local_bash_n_train_isaaclab22": "passed",
+    "local_isaaclab22_package_unittest": "passed",
+    "remote_compileall_isaaclab22_package": "passed",
+    "remote_isaaclab22_package_unittest": "passed",
+    "remote_surgical_robot5_import": "passed",
+    "remote_surgical_robot5_editable_install": "passed_after_pyproject_fix",
+    "remote_isaaclab_zero_step": "passed",
+    "remote_short_training": "passed"
+  },
+  "training": {
+    "num_envs": 2,
+    "sample_max_steps": 1024,
+    "vectorized_steps_completed": 512,
+    "progress_seconds": 26,
+    "progress_it_per_second": 19.51,
+    "buffer_warmup_steps": 64,
+    "batch_size": 8,
+    "batch_length": 16,
+    "imagine_horizon": 5
+  },
+  "outputs": {
+    "log_file": "日志/运行日志.txt",
+    "log_size_mb": 4.1,
+    "checkpoint_dir": "检查点/fdpi-cloud-isaaclab22-smoke/cloud_smoke",
+    "checkpoint_file_count": 17,
+    "pth_checkpoint_count": 12,
+    "checkpoint_dir_size_mb": 189
+  },
+  "warnings": {
+    "warp_cuda_error_lines": 3,
+    "quat_deprecation_lines": 21077,
+    "python_traceback": false
+  }
+}

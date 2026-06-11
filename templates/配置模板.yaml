@@ -1,0 +1,19 @@
+实验:
+  名称:
+  日期:
+  输出目录:
+
+运行:
+  seed:
+  num_envs:
+  device:
+
+训练:
+  total_steps:
+  batch_size:
+  learning_rate:
+
+日志:
+  log_dir:
+  checkpoint_dir:
+  use_wandb:

@@ -1,0 +1,40 @@
+实验:
+  名称: 云端IsaacLab22短训练烟测
+  日期: 2026-06-11
+  目的: 验证 fdpi-1 云端 SurgicalRobot5 与 FDPI Reachability Dreamer IsaacLab22 迁移版本能完成小规模训练闭环。
+  输出目录: experiments/2026-06-11_云端IsaacLab22短训练烟测
+
+远端:
+  主机: fdpi-1
+  项目目录: /root/gpufree-data/fdpi_reachability_dreamer_clean
+  surgical_robot5目录: /root/gpufree-data/surgical_robot5
+  isaaclab_root: /root/IsaacLab
+  conda_env: isaaclab
+
+运行:
+  seed: 0
+  num_envs: 2
+  device: cuda:0
+  wandb_mode: disabled
+
+训练:
+  total_steps: 1024
+  buffer_warmup_steps: 64
+  buffer_max_length: 20000
+  batch_size: 8
+  batch_length: 16
+  imagine_batch_size: 8
+  imagine_context: 8
+  imagine_horizon: 5
+  train_model_every_steps: 64
+  train_agent_every_steps: 64
+  model_update: 1
+  agent_update: 1
+  gp_update_steps: 1
+  gd_update_steps: 1
+  dual_update_steps: 1
+
+日志:
+  log_file: 日志/运行日志.txt
+  checkpoint_dir: 检查点/
+  use_wandb: false

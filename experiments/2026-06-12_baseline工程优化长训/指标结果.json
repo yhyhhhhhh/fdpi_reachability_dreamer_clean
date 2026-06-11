@@ -1,0 +1,12 @@
+{
+  "status": "prepared",
+  "created_at": "2026-06-12 01:11:02 CST",
+  "experiment": "baseline工程优化长训",
+  "config": "configs/reachability_gp_isaaclab22_baseline_engineering.yaml",
+  "sample_max_steps": 10000000,
+  "notes": [
+    "保持 baseline 的训练更新密度和 batch/env 参数。",
+    "只启用 TF32、低频日志、timing、replay cache、sample_many、批量 critic latent encoding 等工程优化。",
+    "用于验证 fast/policy recovery 学习偏弱是否主要来自更新密度下降。"
+  ]
+}

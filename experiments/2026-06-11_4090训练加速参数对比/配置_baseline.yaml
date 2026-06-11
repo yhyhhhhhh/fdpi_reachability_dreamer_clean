@@ -1,0 +1,25 @@
+BaseConfig: 配置.yaml
+
+运行:
+  training_config: configs/reachability_gp_isaaclab22.yaml
+  num_envs: 64
+
+实验:
+  输出目录: experiments/2026-06-11_4090训练加速参数对比/对比结果/baseline
+
+训练:
+  batch_size: 64
+  batch_length: 64
+  imagine_batch_size: 64
+  imagine_context: 16
+  imagine_horizon: 15
+
+Profiling:
+  warmup_env_steps: 32768
+  rollout_iters: 2048
+  update_every_iters: 4
+  model_updates: 4
+  gp_updates: 2
+  gd_updates: 2
+  dual_updates: 2
+  agent_updates: 4

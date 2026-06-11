@@ -1,0 +1,21 @@
+本实验没有修改 FDPI Dreamer 训练算法逻辑。
+
+本次云端迁移烟测使用当前工作区的 IsaacLab 2.2 迁移版：
+- `fdpi_reachability_dreamer_isaaclab22/`
+- `scripts/train_isaaclab22.sh`
+- `configs/reachability_gp_isaaclab22.yaml`
+- `tests/test_isaaclab22_package.py`
+
+本次新增或更新的迁移/实验产物：
+- `/home/yhy/surgical_robot5/exts/surgical_robot5/pyproject.toml`：为 SurgicalRobot5 扩展补充 build requirements，使远端 pip 25 editable 安装可以在构建隔离下找到 `toml`。
+- `experiments/2026-06-11_云端IsaacLab22短训练烟测/运行命令.sh`
+- `experiments/2026-06-11_云端IsaacLab22短训练烟测/配置.yaml`
+- `experiments/2026-06-11_云端IsaacLab22短训练烟测/配置快照/reachability_gp_isaaclab22_短训练烟测.yaml`
+- `experiments/2026-06-11_云端IsaacLab22短训练烟测/日志/运行日志.txt`
+- `experiments/2026-06-11_云端IsaacLab22短训练烟测/检查点/fdpi-cloud-isaaclab22-smoke/cloud_smoke/`
+
+远端同步范围：
+- `/root/gpufree-data/surgical_robot5`
+- `/root/gpufree-data/fdpi_reachability_dreamer_clean`
+
+已排除 `.git`、`ckpt*`、`papers`、缓存和历史运行输出。

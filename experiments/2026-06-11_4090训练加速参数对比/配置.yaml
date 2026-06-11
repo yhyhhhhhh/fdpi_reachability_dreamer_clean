@@ -1,0 +1,51 @@
+实验:
+  名称: 4090训练加速参数对比
+  日期: 2026-06-11
+  目的: 对比当前 baseline、4090 balanced、4090 fast 三组参数下的训练吞吐、更新耗时和 GPU 利用率。
+  输出目录: experiments/2026-06-11_4090训练加速参数对比
+
+运行:
+  seed: 0
+  device: cuda:0
+  env_name: SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1
+  isaaclab_sh: /root/IsaacLab/isaaclab.sh
+  surgical_robot5_ext: /root/gpufree-data/surgical_robot5/exts/surgical_robot5
+  training_config: configs/reachability_gp_isaaclab22_4090_fast.yaml
+  num_envs: 128
+
+训练:
+  batch_size: 256
+  batch_length: 64
+  imagine_batch_size: 256
+  imagine_context: 16
+  imagine_horizon: 15
+  buffer_max_length: 10000000
+
+Profiling:
+  buffer_warmup_rows: 0
+  warmup_env_steps: 32768
+  prefill_rows: 256
+  prefill_margin_rows: 8
+  rollout_iters: 1024
+  update_start_iter: 0
+  update_every_iters: 8
+  phase_step: 2000000
+  dual_rollout_ratio: 0.18
+  model_updates: 2
+  gp_updates: 1
+  gd_updates: 1
+  dual_updates: 1
+  agent_updates: 2
+  disable_obs_normalizer: false
+  save_replay_buffer: false
+  measure_checkpoint: false
+
+GPU采样:
+  interval_seconds: 1.0
+  output_csv: 日志/gpu_stats.csv
+
+日志:
+  wandb_mode: disabled
+  log_dir: 日志
+  checkpoint_dir: 检查点
+  image_dir: 图片

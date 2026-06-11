@@ -1,0 +1,16 @@
+experiment_id: 2026-06-11_云端IsaacLab22短训练烟测
+experiment_name: 云端IsaacLab22短训练烟测
+date: 2026-06-11
+purpose: 验证 fdpi-1 云端 SurgicalRobot5 与 FDPI Reachability Dreamer IsaacLab22 迁移版本能完成小规模训练闭环。
+status: completed
+command: bash experiments/2026-06-11_云端IsaacLab22短训练烟测/运行命令.sh
+config: experiments/2026-06-11_云端IsaacLab22短训练烟测/配置.yaml
+parameter_note: experiments/2026-06-11_云端IsaacLab22短训练烟测/参数说明.md
+config_paths:
+  - experiments/2026-06-11_云端IsaacLab22短训练烟测/配置快照/reachability_gp_isaaclab22_短训练烟测.yaml
+logs:
+  - experiments/2026-06-11_云端IsaacLab22短训练烟测/日志/运行日志.txt
+checkpoints:
+  - experiments/2026-06-11_云端IsaacLab22短训练烟测/检查点/fdpi-cloud-isaaclab22-smoke/cloud_smoke/
+result: 已在 fdpi-1 完成 0 步 IsaacLab 环境检查和 1024 sample steps 短训练烟测，训练进度 512/512 正常结束并保存 step 0 与 step 512 checkpoint。
+notes: 远端路径为 /root/gpufree-data/fdpi_reachability_dreamer_clean；已为 surgical_robot5 补充最小 pyproject.toml，使远端 pip install -e 可在 pip 25 构建隔离下通过。

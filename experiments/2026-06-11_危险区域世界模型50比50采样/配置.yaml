@@ -1,0 +1,37 @@
+实验:
+  名称: 危险区域世界模型50比50采样
+  日期: 2026-06-11
+  目的: 验证修复全 batch safety-critical 采样后，世界模型是否能更充分利用 dual/high-risk 数据并降低危险区域预测误差。
+  主配置: configs/reachability_gp_isaaclab22_4090_fast_wm_safety50.yaml
+  输出目录: experiments/2026-06-11_危险区域世界模型50比50采样/检查点
+
+运行:
+  入口: bash experiments/2026-06-11_危险区域世界模型50比50采样/运行命令.sh
+  训练脚本: scripts/train.sh
+  默认环境: SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1
+  默认设备: cuda:0
+
+训练:
+  基座配置: configs/reachability_gp_isaaclab22_4090_fast.yaml
+  NumEnvs: 128
+  BatchSize: 256
+  ImagineBatchSize: 256
+  TrainModelEverySteps: 1024
+  TrainAgentEverySteps: 1024
+  ModelUpdate: 2
+  AgentUpdate: 2
+  SampleMaxSteps: 10000000
+
+世界模型采样:
+  EnableSafetyCriticalSampling: true
+  UniformRatio: 0.50
+  SafetyCriticalRatio: 0.50
+  HighCostThreshold: 0.1
+  BoundaryLow: 0.05
+  BoundaryHigh: 0.4
+  说明: safety-critical 窗口包括窗口内出现 dual source、高 cost 或 boundary cost 的序列；本实验修复后按全 batch 分配采样配额。
+
+保持不变:
+  DualSampling: 继承 configs/reachability_gp_isaaclab22.yaml
+  DualUpdate: 继承 configs/reachability_gp_isaaclab22.yaml
+  WorldModelLossWeight: 暂不新增 source-aware loss，先隔离验证采样比例变化。

@@ -1,0 +1,56 @@
+当前工作区未提供可用 git diff，本文件记录本次 4090 训练加速方案的变更摘要。
+
+核心代码：
+- fdpi_reachability_dreamer_isaaclab22/train.py
+  - 支持 BaseConfig / _BASE_ 配置 overlay。
+  - 新增 FDPIRegimeDreamer.Performance 默认配置。
+  - 支持 TF32 / matmul precision / cudnn benchmark 配置。
+  - 新增 BatchSize / ImagineBatchSize 与 NumEnvs 的约束检查。
+  - 新增 batch、imagine、train_every、update 次数的命令行覆盖。
+- fdpi_reachability_dreamer_isaaclab22/trainer.py
+  - 新增轻量 timing 日志。
+  - 分开记录 policy inference、env step、replay append、batch sample、WM/Gp/Gd/dual/agent update、logging 和 checkpoint。
+  - 对连续更新预采样 batch，减少重复循环结构。
+  - 支持低频普通日志和低频详细日志。
+- fdpi_reachability_dreamer_isaaclab22/replay_buffer.py
+  - 缓存 valid starts 与 safety-critical starts。
+  - can_sample() 复用 starts 缓存。
+  - append/load 后失效缓存。
+
+配置与脚本：
+- configs/reachability_gp_isaaclab22_4090_fast.yaml
+  - NumEnvs=128，BatchSize=256，ImagineBatchSize=256。
+  - TrainModelEverySteps=1024，TrainAgentEverySteps=1024。
+  - ModelUpdate=2，AgentUpdate=2，Gp/Gd/Dual UpdateSteps=1。
+  - SaveEverySteps=2000000，UseAmp=true，TF32=true。
+- configs/reachability_gp_isaaclab22_4090_balanced.yaml
+  - NumEnvs=128，BatchSize=128，ImagineBatchSize=128。
+  - TrainModelEverySteps=512，TrainAgentEverySteps=512。
+  - ModelUpdate=2，AgentUpdate=2，Gp/Gd/Dual UpdateSteps=1。
+  - SaveEverySteps=2000000，UseAmp=true，TF32=true。
+- scripts/train.sh
+  - 支持通过环境变量覆盖 batch、imagine、train_every、update、save_every 参数。
+- scripts/profiling/benchmark_training_speed.py
+  - 支持 profiling 配置 BaseConfig overlay。
+  - 输出 4090 对比实验记录、指标、图片和 GPU 采样结果。
+
+实验归档：
+- experiments/2026-06-11_4090训练加速参数对比/
+  - 运行命令.sh：fast 单组 profiling。
+  - 运行全部对比.sh：baseline、balanced、fast 三组 profiling。
+  - 配置.yaml：fast 单组入口。
+  - 配置_baseline.yaml、配置_balanced.yaml、配置_fast.yaml：三组对比入口。
+  - 参数说明.md、实验清单.yaml、实验记录.md、指标结果.json。
+
+文档与测试：
+- README.md 增加 4090 speed configs 使用说明。
+- docs/research/CHANGELOG.md、EXPERIMENT_INDEX.md、PROJECT_STATE.md 已更新。
+- tests/test_isaaclab22_package.py 增加 FDPI replay starts 缓存 CPU 单测。
+
+已执行验证：
+- python -m compileall fdpi_reachability_dreamer_isaaclab22 scripts/profiling/benchmark_training_speed.py tests
+- bash -n scripts/train.sh scripts/train_isaaclab22.sh experiments/2026-06-11_4090训练加速参数对比/运行命令.sh experiments/2026-06-11_4090训练加速参数对比/运行全部对比.sh
+- 加载默认、4090 fast、4090 balanced 训练配置并通过 batch/NumEnvs 约束检查。
+- 加载 fast 单组、baseline、balanced、fast 对比 profiling 配置。
+- python -m unittest discover -s tests
+- WANDB_MODE=disabled CONFIG_PATH=configs/reachability_gp_isaaclab22_4090_fast.yaml NUM_ENVS=2 BATCH_SIZE=2 IMAGINE_BATCH_SIZE=2 SAMPLE_MAX_STEPS=0 RUN_NAME=fdpi-4090-fast-smoke RUN_ID=zero_step_after_speedup RUN_ROOT=/tmp/fdpi_4090_fast_smoke bash scripts/train.sh

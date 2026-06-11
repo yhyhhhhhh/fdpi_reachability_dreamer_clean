@@ -1,0 +1,12 @@
+# 实验索引
+
+| 日期 | 实验名称 | 版本 | 目的 | 状态 | 结果简述 | 目录 |
+|---|---|---|---|---|---|---|
+| 2026-06-12 | baseline工程优化长训 | IsaacLab 2.2 / SurgicalRobot5 / baseline + engineering | 保持 baseline 更新密度和 batch/env 参数，只启用 TF32、低频日志、timing、replay cache、sample_many、批量 critic latent encoding 等工程优化 | 已准备 | 已创建配置与运行入口；用于验证 fast/policy recovery 学习偏弱是否主要来自更新密度下降 | `experiments/2026-06-12_baseline工程优化长训/` |
+| 2026-06-11 | 4090策略更新强度恢复验证 | IsaacLab 2.2 / SurgicalRobot5 / 4090 policy recovery | fast 模式策略学习偏弱后，验证恢复 agent/Gp/Gd/dual 更新强度是否能恢复夹取学习 | 运行中 | 首次 run `2hceqcms` 在约 105k env steps 异常停止且日志无 traceback；已增强异常/信号/退出码诊断并重启，当前 W&B run `c6400qld` | `experiments/2026-06-11_4090策略更新强度恢复验证/` |
+| 2026-06-11 | 危险区域世界模型50比50采样 | IsaacLab 2.2 / SurgicalRobot5 / 4090 fast / WM safety50 | 修复 world model safety-critical 采样配额后，验证 50% uniform + 50% safety-critical replay 采样是否改善 dual/high-risk 区域建模 | 已停止 | baseline+safety50 run `f93hle70` 已停止；4090 fast+safety50 run `n60y55jj` 因接近 4M env steps 仍未学会夹取而停止，后续切换到 policy recovery | `experiments/2026-06-11_危险区域世界模型50比50采样/` |
+| 2026-06-11 | 4090训练加速参数对比 | IsaacLab 2.2 / SurgicalRobot5 / 4090 fast | 对比 baseline、4090 balanced、4090 fast 三组训练参数下的吞吐、更新耗时和 GPU 利用率 | 已完成 | warmup 后带更新测量：baseline 213.49 env steps/s，balanced 520.89 env steps/s，fast 659.81 env steps/s；fast 总吞吐 3.09x，采样+更新耗时 3.40x；10M steps 估算约 4.21h | `experiments/2026-06-11_4090训练加速参数对比/` |
+| 2026-06-11 | 云端IsaacLab22短训练烟测 | IsaacLab 2.2 / IsaacSim 5.0 / SurgicalRobot5 | 验证 fdpi-1 云端 SurgicalRobot5 与 FDPI Dreamer IsaacLab22 迁移版本可完成训练闭环 | 已完成 | 0 步环境检查通过；`SampleMaxSteps=1024`、`NumEnvs=2` 短训完成 `512/512`，保存 step 0 与 step 512 checkpoint；补 `pyproject.toml` 后 `surgical_robot5` editable 安装通过 | `experiments/2026-06-11_云端IsaacLab22短训练烟测/` |
+| 2026-06-11 | 训练加速预修改验证 | speedexp / IsaacLab 1.4 | 验证可回退 speedexp 预修改版的训练吞吐、GPU 利用率和阶段耗时 | 已准备 | 已建立独立入口、配置和实验目录；待运行 warmup 后 speed profiling | `experiments/2026-06-11_训练加速预修改验证/` |
+| 2026-06-11 | 训练速度与GPU利用率测试 | clean / IsaacLab 1.4 | 测量 64 env warmup 后训练吞吐、GPU 利用率与阶段耗时瓶颈 | 已完成 | warmup 51200 env steps 后统计：平均 205.57 env steps/s；GPU 平均利用率 60.00%；单项最大耗时为 actor_critic_update_time，占 38.3% | `experiments/2026-06-11_训练速度与GPU利用率测试/` |
+|  |  |  |  |  |  |  |
