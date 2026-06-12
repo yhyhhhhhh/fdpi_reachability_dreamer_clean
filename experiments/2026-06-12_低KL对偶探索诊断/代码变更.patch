@@ -1,0 +1,207 @@
+diff --git a/fdpi_reachability_dreamer_isaaclab22/dual_update.py b/fdpi_reachability_dreamer_isaaclab22/dual_update.py
+index b7c2956..25d36ed 100644
+--- a/fdpi_reachability_dreamer_isaaclab22/dual_update.py
++++ b/fdpi_reachability_dreamer_isaaclab22/dual_update.py
+@@ -74,6 +74,10 @@ def _risk_return_dual_update(
+     entropies = []
+     kls = []
+     costs = []
++    sample_to_main_mean_l2 = []
++    sample_to_main_mean_abs = []
++    mean_l2 = []
++    mean_abs = []
+ 
+     with _eval_mode(world_model, main_agent):
+         for _ in range(horizon):
+@@ -86,6 +90,8 @@ def _risk_return_dual_update(
+             with temporarily_disable_grads(main_agent):
+                 main_dist = dreamer_agent_distribution(main_agent, feat)
+                 main_log_on_dual = main_dist.log_prob(action)[..., None]
++            sample_main_mean_gap = action.detach() - main_dist.base_dist.loc.detach()
++            mean_gap = dual_dist.base_dist.loc.detach() - main_dist.base_dist.loc.detach()
+             kl = log_prob - main_log_on_dual.detach()
+             with torch.no_grad():
+                 next_state = world_model.dynamic.img_step(state, action.detach())
+@@ -95,6 +101,10 @@ def _risk_return_dual_update(
+             entropies.append(entropy)
+             kls.append(kl)
+             costs.append(pred_cost.detach())
++            sample_to_main_mean_l2.append(sample_main_mean_gap.float().pow(2).sum(dim=-1).sqrt())
++            sample_to_main_mean_abs.append(sample_main_mean_gap.float().abs().mean(dim=-1))
++            mean_l2.append(mean_gap.float().pow(2).sum(dim=-1).sqrt())
++            mean_abs.append(mean_gap.float().abs().mean(dim=-1))
+             state = {key: value.detach() for key, value in next_state.items()}
+ 
+     with torch.no_grad():
+@@ -127,6 +137,11 @@ def _risk_return_dual_update(
+         "terminal_gd_mean": terminal_risk.detach().float().mean(),
+         "kl_to_main": kl_to_main.detach().float().mean(),
+         "entropy": entropy.detach().float().mean(),
++        "sample_l2_to_main_mean": torch.stack(sample_to_main_mean_l2, dim=1).detach().float().mean(),
++        "sample_abs_to_main_mean": torch.stack(sample_to_main_mean_abs, dim=1).detach().float().mean(),
++        "mean_l2_to_main": torch.stack(mean_l2, dim=1).detach().float().mean(),
++        "mean_abs_to_main": torch.stack(mean_abs, dim=1).detach().float().mean(),
++        "logprob_gap": kl_to_main.detach().float().mean(),
+     }
+     return loss, info_tensors
+ 
+@@ -162,6 +177,8 @@ def _max_risk_dual_update(batch, world_model, main_agent, gd_critic, dual_policy
+         main_dist = dreamer_agent_distribution(main_agent, z_train)
+         main_log_on_dual = main_dist.log_prob(dual_action)[..., None]
+     kl_to_main = dual_log_prob - main_log_on_dual
++    sample_main_mean_gap = dual_action.detach() - main_dist.base_dist.loc.detach()
++    mean_gap = dual_dist.base_dist.loc.detach() - main_dist.base_dist.loc.detach()
+     with temporarily_disable_grads(gd_critic):
+         score = gd_critic.risk(z_train, dual_action)
+     risk_loss = -score.mean()
+@@ -178,6 +195,11 @@ def _max_risk_dual_update(batch, world_model, main_agent, gd_critic, dual_policy
+         "terminal_gd_mean": score.detach().float().mean(),
+         "kl_to_main": kl_to_main.detach().float().mean(),
+         "entropy": entropy.detach().float().mean(),
++        "sample_l2_to_main_mean": sample_main_mean_gap.detach().float().pow(2).sum(dim=-1).sqrt().mean(),
++        "sample_abs_to_main_mean": sample_main_mean_gap.detach().float().abs().mean(),
++        "mean_l2_to_main": mean_gap.detach().float().pow(2).sum(dim=-1).sqrt().mean(),
++        "mean_abs_to_main": mean_gap.detach().float().abs().mean(),
++        "logprob_gap": kl_to_main.detach().float().mean(),
+     }
+     return loss, info_tensors
+ 
+diff --git a/fdpi_reachability_dreamer_isaaclab22/trainer.py b/fdpi_reachability_dreamer_isaaclab22/trainer.py
+index 046c3b3..4fbc87b 100644
+--- a/fdpi_reachability_dreamer_isaaclab22/trainer.py
++++ b/fdpi_reachability_dreamer_isaaclab22/trainer.py
+@@ -25,6 +25,7 @@ from .cost_utils import (
+     SOURCE_MAIN,
+     cfg_get,
+     continuous_cost_from_force_prediction,
++    dreamer_agent_distribution,
+     extract_continuous_cost,
+     posterior_states_and_features,
+ )
+@@ -353,6 +354,8 @@ def _sample_policy_action(
+     dual_ratio,
+     num_envs,
+     device,
++    logger=None,
++    step=None,
+ ):
+     main_action = agent.sample(feat, greedy=False)
+     action = main_action
+@@ -368,11 +371,72 @@ def _sample_policy_action(
+             action = main_action.clone()
+             action[dual_mask] = dual_action[dual_mask]
+             source[dual_mask] = SOURCE_DUAL
++            _log_rollout_dual_action_diagnostics(
++                logger,
++                step,
++                feat=feat,
++                agent=agent,
++                dual_policy=dual_policy,
++                main_action=main_action,
++                dual_action=dual_action,
++                dual_mask=dual_mask,
++            )
+     env_action = action.detach().cpu().numpy()
+     state = world_model.update_inference_state(state, action)
+     return env_action, action, source, state, g_main
+ 
+ 
++def _logger_enabled(logger, step):
++    if logger is None or step is None:
++        return False
++    if hasattr(logger, "enabled") and not logger.enabled(step):
++        return False
++    return True
++
++
++def _log_rollout_dual_action_diagnostics(
++    logger,
++    step,
++    *,
++    feat,
++    agent,
++    dual_policy,
++    main_action,
++    dual_action,
++    dual_mask,
++):
++    if not _logger_enabled(logger, step):
++        return
++    mask = dual_mask.reshape(-1)
++    selected_ratio = mask.float().mean()
++    logger.log("DualAction/rollout_selected_ratio", float(selected_ratio.detach().float().item()), step)
++    if not bool(mask.any().item()):
++        return
++
++    with torch.no_grad():
++        selected_feat = feat[mask]
++        selected_main_action = main_action[mask]
++        selected_dual_action = dual_action[mask]
++        sample_gap = selected_dual_action - selected_main_action
++        dual_dist = dual_policy.distribution(selected_feat)
++        main_dist = dreamer_agent_distribution(agent, selected_feat)
++        mean_gap = dual_dist.base_dist.loc.detach() - main_dist.base_dist.loc.detach()
++        dual_logprob = dual_dist.log_prob(selected_dual_action)[..., None]
++        main_logprob = main_dist.log_prob(selected_dual_action)[..., None]
++
++        metrics = {
++            "sample_l2": sample_gap.float().pow(2).sum(dim=-1).sqrt().mean(),
++            "sample_abs_mean": sample_gap.float().abs().mean(),
++            "mean_l2": mean_gap.float().pow(2).sum(dim=-1).sqrt().mean(),
++            "mean_abs_mean": mean_gap.float().abs().mean(),
++            "dual_logprob_on_dual": dual_logprob.float().mean(),
++            "main_logprob_on_dual": main_logprob.float().mean(),
++            "logprob_gap": (dual_logprob - main_logprob).float().mean(),
++        }
++    for name, value in metrics.items():
++        logger.log(f"DualAction/rollout_{name}", float(value.detach().float().item()), step)
++
++
+ def _action_bounds(vec_env, device, dtype):
+     space = getattr(vec_env, "single_action_space", getattr(vec_env, "action_space", None))
+     low = getattr(space, "low", None)
+@@ -741,6 +805,7 @@ def joint_train_fdpi(
+     full_state_prefix = str(cfg_get(checkpoint_cfg, "FullStatePrefix", "full_state"))
+     gp_update_steps = max(_cfg_int(gp_cfg, "UpdateSteps", 1), 1)
+     gd_update_steps = max(_cfg_int(gd_cfg, "UpdateSteps", 1), 1)
++    gd_start_step = _cfg_int(gd_cfg, "StartStep", 0)
+     dual_update_steps = max(_cfg_int(dual_update_cfg, "UpdateSteps", 1), 1)
+     log_every_steps = max(_cfg_int(performance_cfg, "LogEverySteps", 1), 1)
+     detailed_log_every_steps = max(_cfg_int(performance_cfg, "DetailedLogEverySteps", log_every_steps), 1)
+@@ -831,6 +896,8 @@ def joint_train_fdpi(
+                     dual_ratio=dual_ratio,
+                     num_envs=num_envs,
+                     device=device,
++                    logger=step_logger,
++                    step=env_steps,
+                 )
+                 step_logger.log("Dual/ratio", dual_ratio, env_steps)
+                 step_logger.log("Dual/active", float(dual_ratio > 0.0), env_steps)
+@@ -1083,7 +1150,12 @@ def joint_train_fdpi(
+                 )
+                 timer.stop("sample_gp_batch", token)
+ 
+-            if _cfg_bool(gd_cfg, "Enable", True) and should_train_agent_side and replay_buffer.can_sample(batch_length):
++            if (
++                _cfg_bool(gd_cfg, "Enable", True)
++                and env_steps >= gd_start_step
++                and should_train_agent_side
++                and replay_buffer.can_sample(batch_length)
++            ):
+                 token = timer.start()
+                 gd_batches = _sample_training_batches(
+                     replay_buffer,
+diff --git a/tests/test_reachability_gp.py b/tests/test_reachability_gp.py
+index 2030fe3..09887ce 100644
+--- a/tests/test_reachability_gp.py
++++ b/tests/test_reachability_gp.py
+@@ -372,6 +372,9 @@ class ReachabilityGpTests(unittest.TestCase):
+         )
+         self.assertIn("loss", info)
+         self.assertIn("kl_to_main", info)
++        self.assertIn("mean_l2_to_main", info)
++        self.assertIn("sample_l2_to_main_mean", info)
++        self.assertIn("logprob_gap", info)
+ 
+ 
+ if __name__ == "__main__":

@@ -1,0 +1,60 @@
+实验:
+  名称: 低KL对偶探索诊断
+  日期: 2026-06-12
+  目的: 验证降低 dual policy KL 惩罚后，对偶策略是否能产生比主策略更高的真实危险采样率，并用 dual-main 动作距离指标解释策略分离程度。
+  主配置: configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl01.yaml
+  输出目录: experiments/2026-06-12_低KL对偶探索诊断/检查点
+
+运行:
+  入口: bash experiments/2026-06-12_低KL对偶探索诊断/运行命令.sh
+  tmux入口: bash experiments/2026-06-12_低KL对偶探索诊断/启动tmux长训.sh
+  训练脚本: scripts/train.sh
+  默认环境: SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1
+  默认设备: cuda:0
+  wandb_mode: online
+
+训练:
+  SampleMaxSteps: 10000000
+  NumEnvs: 64
+  BatchSize: 64
+  BatchLength: 64
+  ImagineBatchSize: 64
+  ImagineContext: 16
+  ImagineHorizon: 15
+  TrainModelEverySteps: 256
+  TrainAgentEverySteps: 256
+  ModelUpdate: 4
+  AgentUpdate: 4
+  SaveEverySteps: 1000000
+
+风险与对偶更新:
+  DualSampling.StartStep: 1000000
+  DualUpdate.StartStep: 1000000
+  Gp.UpdateSteps: 2
+  Gd.UpdateSteps: 2
+  DualUpdate.UpdateSteps: 2
+  DualUpdate.KLCoeff: 0.1
+  对照KLCoeff: 1.0
+
+诊断指标:
+  - DualAction/rollout_sample_l2
+  - DualAction/rollout_mean_l2
+  - DualAction/rollout_logprob_gap
+  - Dual/mean_l2_to_main
+  - Dual/sample_l2_to_main_mean
+  - Dual/logprob_gap
+  - Replay/dual_cost_rate
+  - Replay/main_cost_rate
+
+性能:
+  UseAmp: true
+  AllowTF32: true
+  MatmulPrecision: high
+  LogEverySteps: 4096
+  DetailedLogEverySteps: 8192
+  TimingLogEverySteps: 8192
+  CacheReplayStarts: true
+  UseSampleMany: true
+  UseBatchedCriticLatentEncoding: true
+  BatchedLatentEncodeMaxBatch: 1024
+  FDPIGradDiagnosticsEverySteps: 65536

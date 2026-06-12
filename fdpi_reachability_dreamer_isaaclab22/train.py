@@ -333,6 +333,7 @@ def load_config(config_path):
     for name, dual_weight, high_weight in (("Gp", 1.0, 2.0), ("Gd", 2.0, 3.0)):
         node = _ensure_node(fdpi, name)
         _set_default(node, "Enable", True)
+        _set_default(node, "StartStep", 0)
         _set_default(node, "GammaCost", risk.GammaCost)
         _set_default(node, "RiskMax", risk.RiskMax)
         _set_default(node, "TargetTau", risk.TargetTau)

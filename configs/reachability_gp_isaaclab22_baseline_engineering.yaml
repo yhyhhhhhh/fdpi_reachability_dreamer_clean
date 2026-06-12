@@ -30,8 +30,12 @@ FDPIRegimeDreamer:
   Gp:
     UpdateSteps: 2
   Gd:
+    StartStep: 1000000
     UpdateSteps: 2
+  DualSampling:
+    StartStep: 1000000
   DualUpdate:
+    StartStep: 1000000
     UpdateSteps: 2
   Performance:
     AllowTF32: true

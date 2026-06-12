@@ -1,5 +1,5 @@
 {
-  "status": "running_after_restart",
+  "status": "stopped_manual",
   "created_at": "2026-06-11 21:34:08 CST",
   "started_at": "2026-06-11 21:39:21 CST",
   "stopped_at": "2026-06-11 21:43:29 CST",
@@ -28,6 +28,14 @@
     "last_progress_vectorized_step": 827,
     "approx_env_steps": 105856,
     "saved_checkpoints": ["step_0"]
+  },
+  "manual_stop": {
+    "stopped_at": "2026-06-12 01:26:46 CST",
+    "reason": "policy recovery 到约 3.06M env steps 仍未恢复旧 baseline 的夹取学习表现，切换到 baseline 工程优化长训。",
+    "tmux_exit_status": 141,
+    "last_progress_vectorized_step": 23923,
+    "approx_env_steps": 3062144,
+    "latest_confirmed_full_state": "full_state_isaaclab22_2999808.pth"
   },
   "notes": [
     "用户观察 fast 接近 4M env steps 仍未学会夹取，原训练约 1M 已学会夹取。",

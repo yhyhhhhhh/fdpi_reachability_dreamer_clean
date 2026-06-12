@@ -74,6 +74,10 @@ def _risk_return_dual_update(
     entropies = []
     kls = []
     costs = []
+    sample_to_main_mean_l2 = []
+    sample_to_main_mean_abs = []
+    mean_l2 = []
+    mean_abs = []
 
     with _eval_mode(world_model, main_agent):
         for _ in range(horizon):
@@ -86,6 +90,8 @@ def _risk_return_dual_update(
             with temporarily_disable_grads(main_agent):
                 main_dist = dreamer_agent_distribution(main_agent, feat)
                 main_log_on_dual = main_dist.log_prob(action)[..., None]
+            sample_main_mean_gap = action.detach() - main_dist.base_dist.loc.detach()
+            mean_gap = dual_dist.base_dist.loc.detach() - main_dist.base_dist.loc.detach()
             kl = log_prob - main_log_on_dual.detach()
             with torch.no_grad():
                 next_state = world_model.dynamic.img_step(state, action.detach())
@@ -95,6 +101,10 @@ def _risk_return_dual_update(
             entropies.append(entropy)
             kls.append(kl)
             costs.append(pred_cost.detach())
+            sample_to_main_mean_l2.append(sample_main_mean_gap.float().pow(2).sum(dim=-1).sqrt())
+            sample_to_main_mean_abs.append(sample_main_mean_gap.float().abs().mean(dim=-1))
+            mean_l2.append(mean_gap.float().pow(2).sum(dim=-1).sqrt())
+            mean_abs.append(mean_gap.float().abs().mean(dim=-1))
             state = {key: value.detach() for key, value in next_state.items()}
 
     with torch.no_grad():
@@ -127,6 +137,11 @@ def _risk_return_dual_update(
         "terminal_gd_mean": terminal_risk.detach().float().mean(),
         "kl_to_main": kl_to_main.detach().float().mean(),
         "entropy": entropy.detach().float().mean(),
+        "sample_l2_to_main_mean": torch.stack(sample_to_main_mean_l2, dim=1).detach().float().mean(),
+        "sample_abs_to_main_mean": torch.stack(sample_to_main_mean_abs, dim=1).detach().float().mean(),
+        "mean_l2_to_main": torch.stack(mean_l2, dim=1).detach().float().mean(),
+        "mean_abs_to_main": torch.stack(mean_abs, dim=1).detach().float().mean(),
+        "logprob_gap": kl_to_main.detach().float().mean(),
     }
     return loss, info_tensors
 
@@ -162,6 +177,8 @@ def _max_risk_dual_update(batch, world_model, main_agent, gd_critic, dual_policy
         main_dist = dreamer_agent_distribution(main_agent, z_train)
         main_log_on_dual = main_dist.log_prob(dual_action)[..., None]
     kl_to_main = dual_log_prob - main_log_on_dual
+    sample_main_mean_gap = dual_action.detach() - main_dist.base_dist.loc.detach()
+    mean_gap = dual_dist.base_dist.loc.detach() - main_dist.base_dist.loc.detach()
     with temporarily_disable_grads(gd_critic):
         score = gd_critic.risk(z_train, dual_action)
     risk_loss = -score.mean()
@@ -178,6 +195,11 @@ def _max_risk_dual_update(batch, world_model, main_agent, gd_critic, dual_policy
         "terminal_gd_mean": score.detach().float().mean(),
         "kl_to_main": kl_to_main.detach().float().mean(),
         "entropy": entropy.detach().float().mean(),
+        "sample_l2_to_main_mean": sample_main_mean_gap.detach().float().pow(2).sum(dim=-1).sqrt().mean(),
+        "sample_abs_to_main_mean": sample_main_mean_gap.detach().float().abs().mean(),
+        "mean_l2_to_main": mean_gap.detach().float().pow(2).sum(dim=-1).sqrt().mean(),
+        "mean_abs_to_main": mean_gap.detach().float().abs().mean(),
+        "logprob_gap": kl_to_main.detach().float().mean(),
     }
     return loss, info_tensors
 

@@ -2,6 +2,149 @@
 
 ## 2026-06-12
 
+### LOGIC_CHANGE：将 Gd 更新延后到对偶策略启用后
+
+修改内容：
+- 新增 `FDPIRegimeDreamer.Gd.StartStep` 配置项，默认补全值为 `0`，保持旧配置兼容。
+- 在 `configs/reachability_gp_isaaclab22.yaml` 和 `configs/reachability_gp_isaaclab22_baseline_engineering.yaml` 中设置 `Gd.StartStep=1000000`。
+- 在 `fdpi_reachability_dreamer_isaaclab22/trainer.py` 中增加 Gd 更新门控：`env_steps < Gd.StartStep` 时不采样 Gd batch，也不执行 `gd_critic.update()`。
+
+修改原因：
+- Gd 主要服务 dual policy 的高风险数据采集和 dual update；当 `DualSampling` 与 `DualUpdate` 已延后到 `1M env steps` 时，1M 前持续更新 Gd 对主策略学习收益有限。
+- 在不降低 world model、Gp 和主策略更新密度的前提下，减少前 `1M env steps` 的更新开销。
+
+影响：
+- 后续 IsaacLab22 主线及其派生配置在 `1M env steps` 前会跳过 Gd 更新。
+- `sample_many` 和 batched latent encoding 保持启用，不作为本次疑点处理。
+- 已在运行中的训练不会自动应用该改动，需要重启新 run 才生效。
+
+验证方式：
+- 已通过：`python -m py_compile fdpi_reachability_dreamer_isaaclab22/train.py fdpi_reachability_dreamer_isaaclab22/trainer.py`。
+- 已通过：使用项目 `load_config()` 加载默认、baseline-engineering、4090 fast、4090 balanced 和 policy-recovery 配置，确认 `Gd.StartStep=1000000`，且 `UseSampleMany=True`、`UseBatchedCriticLatentEncoding=True` 保持不变。
+
+相关实验：
+- 建议后续基于 baseline-engineering 配置重启一组 “dual/Gd 延后到 1M” 对照长训。
+
+---
+
+### LOGIC_CHANGE：新增 dual-main 动作距离诊断日志
+
+修改内容：
+- 在 `fdpi_reachability_dreamer_isaaclab22/trainer.py` 的真实 rollout dual 替换路径中新增 `DualAction/rollout_*` 指标。
+- 在 `fdpi_reachability_dreamer_isaaclab22/dual_update.py` 的 `imagined_risk_return` 和 `max_risk` dual 更新中新增 dual/main 策略分离指标。
+- 新增指标包括 sampled action L2、策略均值 L2、绝对差均值和 logprob gap。
+- 更新 `tests/test_reachability_gp.py`，确认 dual update 返回新增诊断字段。
+
+修改原因：
+- W&B run `yygyodz1` 显示 dual 数据占比不低，但真实危险率没有高于 main，需要直接判断 dual policy 是否真的偏离主策略。
+- 仅看 `Dual/kl_to_main` 难以区分“动作分布均值接近”“采样动作接近”和“logprob gap 较大但真实动作未带来危险”。
+
+影响：
+- 不改变训练 loss、采样比例、优化步数或 replay 内容。
+- W&B 新增 `DualAction/rollout_sample_l2`、`DualAction/rollout_mean_l2`、`DualAction/rollout_logprob_gap`、`Dual/mean_l2_to_main`、`Dual/sample_l2_to_main_mean` 等诊断曲线。
+
+验证方式：
+- 已通过：`python -m pytest tests/test_reachability_gp.py -q`。
+- 已通过：`python -m py_compile fdpi_reachability_dreamer_isaaclab22/trainer.py fdpi_reachability_dreamer_isaaclab22/dual_update.py`。
+
+相关实验：
+- `experiments/2026-06-12_低KL对偶探索诊断/`
+
+---
+
+### CONFIG_CHANGE：新增 dual KL 0.1 对偶探索诊断配置
+
+修改内容：
+- 新增 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl01.yaml`。
+- 该配置继承 `configs/reachability_gp_isaaclab22_baseline_engineering.yaml`，只将 `FDPIRegimeDreamer.DualUpdate.KLCoeff` 调整为 `0.1`，并更新 W&B name。
+
+修改原因：
+- 当前 run `yygyodz1` 中 `Dual/kl_loss` 量级明显大于 `Dual/policy_loss`，怀疑 KL 项压制了 Gd 风险探索项。
+- 需要第一档保守 ablation，验证降低 KL 后 dual 是否能产生更高真实危险率。
+
+影响：
+- 默认配置不因本条新增配置而改变。
+- 新实验仍保留 baseline 工程优化训练密度、`DualSampling.StartStep=1000000` 与 `DualUpdate.StartStep=1000000`。
+
+验证方式：
+- 已通过：加载 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl01.yaml`，确认 `DualUpdate.KLCoeff=0.1` 且 baseline 训练密度保持不变。
+
+相关实验：
+- `experiments/2026-06-12_低KL对偶探索诊断/`
+
+---
+
+### EXPERIMENT_ONLY：新增低KL对偶探索诊断实验目录
+
+修改内容：
+- 新增实验目录 `experiments/2026-06-12_低KL对偶探索诊断/`。
+- 新增 `运行命令.sh`、`启动tmux长训.sh`、`配置.yaml`、`参数说明.md`、`实验清单.yaml`、`实验记录.md`、`指标结果.json`、`配置快照/` 和 `代码变更.patch`。
+- 更新 `docs/research/EXPERIMENT_INDEX.md` 与 `docs/research/PROJECT_STATE.md`。
+
+修改原因：
+- 用户要求执行“降低 KL 到 0.1”和“记录 dual-main 动作距离”两个验证项。
+- 实验命令涉及配置、W&B、checkpoint 和日志路径，按实验命令管理规则沉淀为短脚本入口。
+
+影响：
+- 新实验可通过短命令 `bash experiments/2026-06-12_低KL对偶探索诊断/运行命令.sh` 运行。
+- 当前正在运行的 baseline 工程优化长训不会自动切换到该配置。
+
+验证方式：
+- 已通过：`bash -n experiments/2026-06-12_低KL对偶探索诊断/运行命令.sh experiments/2026-06-12_低KL对偶探索诊断/启动tmux长训.sh`。
+
+相关实验：
+- `experiments/2026-06-12_低KL对偶探索诊断/`
+
+---
+
+### CONFIG_CHANGE：将对偶策略采样与更新延后到 1M
+
+修改内容：
+- 将 `configs/reachability_gp_isaaclab22.yaml` 中 `FDPIRegimeDreamer.DualSampling.StartStep` 从 `100000` 调整为 `1000000`。
+- 将 `configs/reachability_gp_isaaclab22.yaml` 中 `FDPIRegimeDreamer.DualUpdate.StartStep` 从 `100000` 调整为 `1000000`。
+- 在 `configs/reachability_gp_isaaclab22_baseline_engineering.yaml` 中显式写入相同的 `DualSampling.StartStep=1000000` 与 `DualUpdate.StartStep=1000000`，避免派生配置启动时隐式继承早期对偶策略时机。
+
+修改原因：
+- W&B 对比显示前 `1M env steps` 的 reward 学习速度差异明显，而当前默认配置从 `100k env steps` 开始引入 dual sampling 与 dual update。
+- 需要先让主策略和 world model 在前 `1M env steps` 内更接近纯主策略数据分布，再观察夹取/奖励学习是否恢复。
+
+影响：
+- 后续新启动训练在 `1M env steps` 前不会使用 dual policy 采集环境动作，也不会更新 dual policy。
+- `Gp` 仍按原配置训练；`Gd` 后续已单独增加 `StartStep` 门控并与 dual 启用时机对齐；`MainFDPIRegime` 仍在 `1M env steps` 后启用。
+- 已经运行中的 tmux 训练不会自动应用此配置，需要重启新 run 才生效。
+
+验证方式：
+- 已通过：使用项目 `load_config()` 加载 `configs/reachability_gp_isaaclab22.yaml` 和 `configs/reachability_gp_isaaclab22_baseline_engineering.yaml`，确认 `DualSampling.StartStep=1000000`、`DualUpdate.StartStep=1000000`。
+
+相关实验：
+- 后续建议基于 `experiments/2026-06-12_baseline工程优化长训/` 新开延后 dual 的对照长训。
+
+---
+
+### EXPERIMENT_ONLY：停止 policy recovery 并启动 baseline 工程优化长训
+
+修改内容：
+- 向 tmux 会话 `policy_recovery_long` 发送 `Ctrl-C`，停止 W&B run `c6400qld` 对应的 policy recovery 长训。
+- 使用 `experiments/2026-06-12_baseline工程优化长训/启动tmux长训.sh` 启动 baseline 工程优化长训。
+- 更新两个实验目录的 `实验记录.md`、`指标结果.json` 和 `实验清单.yaml`，并更新 `docs/research/EXPERIMENT_INDEX.md` 与 `docs/research/PROJECT_STATE.md`。
+
+修改原因：
+- policy recovery 到约 `3.06M env steps` 仍未恢复旧 baseline 的夹取学习表现，需要回到 baseline 更新密度，只保留工程优化做对照。
+
+影响：
+- 当前活跃训练切换为 tmux 会话 `baseline_engineering_long`。
+- 新 W&B run 为 `yygyodz1`，checkpoint 目录为 `experiments/2026-06-12_baseline工程优化长训/检查点/fdpi-baseline-engineering/baseline_engineering_20260612_012750`。
+
+验证方式：
+- 已确认旧训练 Python / IsaacLab 进程退出，GPU 显存回落到约 `58 MiB`。
+- 已确认新训练 IsaacLab 环境创建成功，环境数为 `64`，训练进度条已开始，step 0 checkpoint 已保存。
+
+相关实验：
+- `experiments/2026-06-11_4090策略更新强度恢复验证/`
+- `experiments/2026-06-12_baseline工程优化长训/`
+
+---
+
 ### CONFIG_CHANGE：完善 Git 忽略规则排除训练大文件
 
 修改内容：

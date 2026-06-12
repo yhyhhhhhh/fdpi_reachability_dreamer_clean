@@ -165,6 +165,7 @@ FDPIRegimeDreamer:
 
   Gd:
     Enable: true
+    StartStep: 1000000
     CostKey: "binary_cost"
     TargetType: "td_binary"
     GammaCost: 0.97
@@ -204,7 +205,7 @@ FDPIRegimeDreamer:
 
   DualSampling:
     Enable: true
-    StartStep: 100000
+    StartStep: 1000000
     FeasibleRatioWindow: 10000
     RatioFea95: 0.35
     RatioFea90: 0.45
@@ -218,7 +219,7 @@ FDPIRegimeDreamer:
 
   DualUpdate:
     Enable: true
-    StartStep: 100000
+    StartStep: 1000000
     Type: "imagined_risk_return"
     Horizon: 5
     GammaCost: 0.97

@@ -1,9 +1,24 @@
 {
-  "status": "prepared",
+  "status": "running",
   "created_at": "2026-06-12 01:11:02 CST",
+  "started_at": "2026-06-12 01:27:50 CST",
   "experiment": "baseline工程优化长训",
   "config": "configs/reachability_gp_isaaclab22_baseline_engineering.yaml",
   "sample_max_steps": 10000000,
+  "tmux_session": "baseline_engineering_long",
+  "run_id": "baseline_engineering_20260612_012750",
+  "wandb_run_id": "yygyodz1",
+  "wandb_run_url": "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/yygyodz1",
+  "log": "experiments/2026-06-12_baseline工程优化长训/日志/tmux训练_baseline_engineering_20260612_012750.log",
+  "checkpoint_dir": "experiments/2026-06-12_baseline工程优化长训/检查点/fdpi-baseline-engineering/baseline_engineering_20260612_012750",
+  "startup_check": {
+    "isaaclab_env_created": true,
+    "num_envs": 64,
+    "progress_bar_started": true,
+    "step0_checkpoint_saved": true,
+    "gpu_memory_used_mb": 5710,
+    "gpu_utilization_percent": 26
+  },
   "notes": [
     "保持 baseline 的训练更新密度和 batch/env 参数。",
     "只启用 TF32、低频日志、timing、replay cache、sample_many、批量 critic latent encoding 等工程优化。",

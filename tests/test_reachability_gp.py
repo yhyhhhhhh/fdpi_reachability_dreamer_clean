@@ -372,6 +372,9 @@ class ReachabilityGpTests(unittest.TestCase):
         )
         self.assertIn("loss", info)
         self.assertIn("kl_to_main", info)
+        self.assertIn("mean_l2_to_main", info)
+        self.assertIn("sample_l2_to_main_mean", info)
+        self.assertIn("logprob_gap", info)
 
 
 if __name__ == "__main__":

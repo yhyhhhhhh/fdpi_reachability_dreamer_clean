@@ -25,6 +25,7 @@ from .cost_utils import (
     SOURCE_MAIN,
     cfg_get,
     continuous_cost_from_force_prediction,
+    dreamer_agent_distribution,
     extract_continuous_cost,
     posterior_states_and_features,
 )
@@ -353,6 +354,8 @@ def _sample_policy_action(
     dual_ratio,
     num_envs,
     device,
+    logger=None,
+    step=None,
 ):
     main_action = agent.sample(feat, greedy=False)
     action = main_action
@@ -368,9 +371,70 @@ def _sample_policy_action(
             action = main_action.clone()
             action[dual_mask] = dual_action[dual_mask]
             source[dual_mask] = SOURCE_DUAL
+            _log_rollout_dual_action_diagnostics(
+                logger,
+                step,
+                feat=feat,
+                agent=agent,
+                dual_policy=dual_policy,
+                main_action=main_action,
+                dual_action=dual_action,
+                dual_mask=dual_mask,
+            )
     env_action = action.detach().cpu().numpy()
     state = world_model.update_inference_state(state, action)
     return env_action, action, source, state, g_main
+
+
+def _logger_enabled(logger, step):
+    if logger is None or step is None:
+        return False
+    if hasattr(logger, "enabled") and not logger.enabled(step):
+        return False
+    return True
+
+
+def _log_rollout_dual_action_diagnostics(
+    logger,
+    step,
+    *,
+    feat,
+    agent,
+    dual_policy,
+    main_action,
+    dual_action,
+    dual_mask,
+):
+    if not _logger_enabled(logger, step):
+        return
+    mask = dual_mask.reshape(-1)
+    selected_ratio = mask.float().mean()
+    logger.log("DualAction/rollout_selected_ratio", float(selected_ratio.detach().float().item()), step)
+    if not bool(mask.any().item()):
+        return
+
+    with torch.no_grad():
+        selected_feat = feat[mask]
+        selected_main_action = main_action[mask]
+        selected_dual_action = dual_action[mask]
+        sample_gap = selected_dual_action - selected_main_action
+        dual_dist = dual_policy.distribution(selected_feat)
+        main_dist = dreamer_agent_distribution(agent, selected_feat)
+        mean_gap = dual_dist.base_dist.loc.detach() - main_dist.base_dist.loc.detach()
+        dual_logprob = dual_dist.log_prob(selected_dual_action)[..., None]
+        main_logprob = main_dist.log_prob(selected_dual_action)[..., None]
+
+        metrics = {
+            "sample_l2": sample_gap.float().pow(2).sum(dim=-1).sqrt().mean(),
+            "sample_abs_mean": sample_gap.float().abs().mean(),
+            "mean_l2": mean_gap.float().pow(2).sum(dim=-1).sqrt().mean(),
+            "mean_abs_mean": mean_gap.float().abs().mean(),
+            "dual_logprob_on_dual": dual_logprob.float().mean(),
+            "main_logprob_on_dual": main_logprob.float().mean(),
+            "logprob_gap": (dual_logprob - main_logprob).float().mean(),
+        }
+    for name, value in metrics.items():
+        logger.log(f"DualAction/rollout_{name}", float(value.detach().float().item()), step)
 
 
 def _action_bounds(vec_env, device, dtype):
@@ -741,6 +805,7 @@ def joint_train_fdpi(
     full_state_prefix = str(cfg_get(checkpoint_cfg, "FullStatePrefix", "full_state"))
     gp_update_steps = max(_cfg_int(gp_cfg, "UpdateSteps", 1), 1)
     gd_update_steps = max(_cfg_int(gd_cfg, "UpdateSteps", 1), 1)
+    gd_start_step = _cfg_int(gd_cfg, "StartStep", 0)
     dual_update_steps = max(_cfg_int(dual_update_cfg, "UpdateSteps", 1), 1)
     log_every_steps = max(_cfg_int(performance_cfg, "LogEverySteps", 1), 1)
     detailed_log_every_steps = max(_cfg_int(performance_cfg, "DetailedLogEverySteps", log_every_steps), 1)
@@ -831,6 +896,8 @@ def joint_train_fdpi(
                     dual_ratio=dual_ratio,
                     num_envs=num_envs,
                     device=device,
+                    logger=step_logger,
+                    step=env_steps,
                 )
                 step_logger.log("Dual/ratio", dual_ratio, env_steps)
                 step_logger.log("Dual/active", float(dual_ratio > 0.0), env_steps)
@@ -1083,7 +1150,12 @@ def joint_train_fdpi(
                 )
                 timer.stop("sample_gp_batch", token)
 
-            if _cfg_bool(gd_cfg, "Enable", True) and should_train_agent_side and replay_buffer.can_sample(batch_length):
+            if (
+                _cfg_bool(gd_cfg, "Enable", True)
+                and env_steps >= gd_start_step
+                and should_train_agent_side
+                and replay_buffer.can_sample(batch_length)
+            ):
                 token = timer.start()
                 gd_batches = _sample_training_batches(
                     replay_buffer,
