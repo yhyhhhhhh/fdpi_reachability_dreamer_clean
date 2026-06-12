@@ -412,6 +412,18 @@ def load_config(config_path):
     _set_default(wm_sampling, "BoundaryLow", 0.05)
     _set_default(wm_sampling, "BoundaryHigh", 0.4)
 
+    wm_eval = _ensure_node(fdpi, "WorldModelEval")
+    _set_default(wm_eval, "Enable", False)
+    _set_default(wm_eval, "StartStep", 1000000)
+    _set_default(wm_eval, "EverySteps", 1000000)
+    _set_default(wm_eval, "NumBatches", 4)
+    _set_default(wm_eval, "BatchSize", 256)
+    _set_default(wm_eval, "EvalLength", 48)
+    _set_default(wm_eval, "ContextLength", 16)
+    _set_default(wm_eval, "Horizons", [1, 3, 5, 10, 15, 30])
+    _set_default(wm_eval, "MinSamplesPerSplit", 128)
+    _set_default(wm_eval, "CostSplits", True)
+
     checkpoint = _ensure_node(fdpi, "Checkpoint")
     _set_default(checkpoint, "SaveFullState", True)
     _set_default(checkpoint, "SaveReplayBuffer", True)

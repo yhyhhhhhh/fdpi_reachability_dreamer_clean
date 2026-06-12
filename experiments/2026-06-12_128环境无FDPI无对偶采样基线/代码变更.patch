@@ -1,0 +1,76 @@
+diff --git a/configs/reachability_gp_isaaclab22_baseline_engineering_no_fdpi_no_dual_128env.yaml b/configs/reachability_gp_isaaclab22_baseline_engineering_no_fdpi_no_dual_128env.yaml
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/configs/reachability_gp_isaaclab22_baseline_engineering_no_fdpi_no_dual_128env.yaml
+@@ -0,0 +1,30 @@
++BaseConfig: reachability_gp_isaaclab22_baseline_engineering_dual_kl01_128env.yaml
++
++Wandb:
++  Name: "Dreamer-no-fdpi-no-dual-IsaacLab22-SurgicalRobot5-baseline-engineering-128env"
++
++FDPIRegimeDreamer:
++  Gp:
++    Enable: false
++
++  Gd:
++    Enable: false
++
++  MainFDPIRegime:
++    Enable: false
++
++  DualSampling:
++    Enable: false
++    RatioFea95: 0.0
++    RatioFea90: 0.0
++    RatioFea80: 0.0
++    RatioCriticalHigh: 0.0
++    RatioUnsafeHigh: 0.0
++    RatioDefault: 0.0
++
++  DualUpdate:
++    Enable: false
++    UpdateSteps: 0
++
++  WorldModelEval:
++    Enable: true
+diff --git a/fdpi_reachability_dreamer_isaaclab22/trainer.py b/fdpi_reachability_dreamer_isaaclab22/trainer.py
+index 0000000..0000000 100644
+--- a/fdpi_reachability_dreamer_isaaclab22/trainer.py
++++ b/fdpi_reachability_dreamer_isaaclab22/trainer.py
+@@ -1302,6 +1302,7 @@ def joint_train_fdpi(
+     use_batched_critic_latent = _cfg_bool(performance_cfg, "UseBatchedCriticLatentEncoding", True)
+     batched_latent_max_batch = max(_cfg_int(performance_cfg, "BatchedLatentEncodeMaxBatch", 1024), 0)
+     fdpi_grad_diagnostics_every_steps = _cfg_int(performance_cfg, "FDPIGradDiagnosticsEverySteps", 65536)
+     timing_enabled = timing_log_every_steps > 0
++    gp_enabled = _cfg_bool(gp_cfg, "Enable", True)
+     step_logger = _EveryNStepLogger(
+         logger,
+         every_steps=log_every_steps,
+@@ -1383,7 +1384,7 @@ def joint_train_fdpi(
+                 env_action, action, source, state, g_main_for_window = _sample_policy_action(
+                     feat=feat,
+                     agent=agent,
+-                    gp_critic=gp_critic,
++                    gp_critic=gp_critic if gp_enabled else None,
+                     dual_policy=dual_policy,
+                     world_model=world_model,
+                     state=state,
+@@ -1663,7 +1664,7 @@ def joint_train_fdpi(
+             detailed_metrics_enabled = detailed_logger.enabled(env_steps)
+             policy_metrics_enabled = step_logger.enabled(env_steps)
+ 
+-            if _cfg_bool(gp_cfg, "Enable", True) and should_train_agent_side and replay_buffer.can_sample(batch_length):
++            if gp_enabled and should_train_agent_side and replay_buffer.can_sample(batch_length):
+                 token = timer.start()
+                 gp_batches = _sample_training_batches(
+                     replay_buffer,
+@@ -1791,7 +1792,7 @@ def joint_train_fdpi(
+                         imagine_samples,
+                         world_model,
+                         agent,
+-                        gp_critic,
++                        gp_critic if gp_enabled else None,
+                         imagine_horizon,
+                         step_logger if policy_metrics_enabled else None,
+                         env_steps,

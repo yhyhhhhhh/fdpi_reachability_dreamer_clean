@@ -236,6 +236,18 @@ FDPIRegimeDreamer:
     BoundaryLow: 0.05
     BoundaryHigh: 0.4
 
+  WorldModelEval:
+    Enable: false
+    StartStep: 1000000
+    EverySteps: 1000000
+    NumBatches: 4
+    BatchSize: 256
+    EvalLength: 48
+    ContextLength: 16
+    Horizons: [1, 3, 5, 10, 15, 30]
+    MinSamplesPerSplit: 128
+    CostSplits: true
+
   Checkpoint:
     SaveFullState: true
     SaveReplayBuffer: false

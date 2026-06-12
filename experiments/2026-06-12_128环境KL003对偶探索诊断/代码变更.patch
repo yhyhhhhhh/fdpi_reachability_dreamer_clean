@@ -1,0 +1,368 @@
+diff --git a/docs/research/CHANGELOG.md b/docs/research/CHANGELOG.md
+index 87fd461..fa34605 100644
+--- a/docs/research/CHANGELOG.md
++++ b/docs/research/CHANGELOG.md
+@@ -2,6 +2,78 @@
+ 
+ ## 2026-06-12
+ 
++### LOGIC_CHANGE：新增最近窗口 source-aware 真实 cost 诊断
++
++修改内容：
++- 新增 `SourceCostStatsWindow`，按最近窗口同时统计 main / dual 来源样本的 `binary_cost`、`continuous_cost`、`extreme_cost` 和来源占比。
++- 训练循环每个环境步将当前 `source`、`continuous_cost`、`binary_cost`、`extreme_cost` 写入最近窗口。
++- 按 `LogEverySteps` 新增 W&B 指标 `RecentCost/*`，包括 `main_binary_cost_rate`、`dual_binary_cost_rate`、`main_continuous_cost_mean`、`dual_continuous_cost_mean`、`main_extreme_cost_rate`、`dual_extreme_cost_rate`、`main_ratio`、`dual_ratio`、`main_count`、`dual_count` 和 `window_count`。
++- 窗口长度复用 `DualSampling.FeasibleRatioWindow`，当前主线配置为最近 `10000` 个环境样本。
++
++修改原因：
++- `Replay/main_cost_rate` / `Replay/dual_cost_rate` 是全 replay buffer 历史统计，main 来源会包含 `1M env steps` 前未启用安全优化和 dual 对照的数据。
++- 直接用全 replay 的 main/dual cost rate 判断当前 dual 是否更危险不够公平，需要同一最近窗口下的 source-aware 真实 cost 对比。
++
++影响：
++- 不改变训练采样、replay 内容、loss 或优化步骤。
++- 新指标用于诊断当前 rollout 中 main 与 dual 的真实危险率，避免被早期 replay 历史污染。
++- 已在运行中的训练不会自动出现该指标，需要重启新 run 后生效。
++
++验证方式：
++- 已通过：`python -m py_compile fdpi_reachability_dreamer_isaaclab22/sampling.py fdpi_reachability_dreamer_isaaclab22/trainer.py`。
++- 已通过：`python -m unittest tests.test_reachability_gp`。
++
++相关实验：
++- 后续重启 `experiments/2026-06-12_128环境低KL对偶探索长训/` 或启动 `experiments/2026-06-12_128环境KL003对偶探索诊断/` 后生效。
++
++---
++
++### CONFIG_CHANGE：新增 128 环境 KL 0.03 对偶探索诊断配置
++
++修改内容：
++- 新增 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl003_128env.yaml`。
++- 该配置继承 `baseline_engineering_dual_kl01_128env`，仅将 `FDPIRegimeDreamer.DualUpdate.KLCoeff` 从 `0.1` 降到 `0.03`。
++- 保持 `DualUpdate.Type=imagined_risk_return`、128 env、batch 128、更新触发频率和 Gd/Dual 延后到 `1M env steps` 等设置不变。
++
++修改原因：
++- 当前 W&B run `riz27lm5` 中 `Dual/kl_loss` 仍显著大于 `Dual/policy_loss`，且 `Replay/dual_cost_rate` 低于 `Replay/main_cost_rate`。
++- 用户希望先采用最小改动继续降低 KL，而不是切换到 `max_risk` 目标。
++
++影响：
++- 默认配置不变。
++- 新实验可用于判断仅降低 KL 是否能提升 dual 真实危险采样率。
++
++验证方式：
++- 已通过：配置文件静态检查确认新配置仅覆盖 `DualUpdate.KLCoeff=0.03`。
++- 已通过：`bash -n experiments/2026-06-12_128环境KL003对偶探索诊断/运行命令.sh experiments/2026-06-12_128环境KL003对偶探索诊断/启动tmux长训.sh`。
++
++相关实验：
++- `experiments/2026-06-12_128环境KL003对偶探索诊断/`
++
++---
++
++### EXPERIMENT_ONLY：新增 128 环境 KL 0.03 对偶探索诊断入口
++
++修改内容：
++- 新增实验目录 `experiments/2026-06-12_128环境KL003对偶探索诊断/`。
++- 新增 `运行命令.sh`、`启动tmux长训.sh`、`配置.yaml`、`参数说明.md`、`实验清单.yaml`、`实验记录.md`、`指标结果.json` 和配置快照。
++
++修改原因：
++- 将 KL 0.03 对偶探索诊断沉淀为可复现短命令，便于和当前 KL 0.1 的 128 env run 做直接对照。
++
++影响：
++- 可通过 `bash experiments/2026-06-12_128环境KL003对偶探索诊断/启动tmux长训.sh` 启动独立 tmux 长训。
++- 输出、日志和 checkpoint 独立保存到该实验目录，不影响当前 KL 0.1 长训。
++
++验证方式：
++- 已通过：实验目录结构和配置快照已创建。
++- 已通过：启动脚本 shell 语法检查。
++
++相关实验：
++- `experiments/2026-06-12_128环境KL003对偶探索诊断/`
++
++---
++
+ ### LOGIC_CHANGE：降低正式训练中的非关键指标同步开销
+ 
+ 修改内容：
+diff --git a/docs/research/EXPERIMENT_INDEX.md b/docs/research/EXPERIMENT_INDEX.md
+index 63ddb5e..927c206 100644
+--- a/docs/research/EXPERIMENT_INDEX.md
++++ b/docs/research/EXPERIMENT_INDEX.md
+@@ -2,7 +2,8 @@
+ 
+ | 日期 | 实验名称 | 版本 | 目的 | 状态 | 结果简述 | 目录 |
+ |---|---|---|---|---|---|---|
+-| 2026-06-12 | 128环境低KL对偶探索长训 | IsaacLab 2.2 / SurgicalRobot5 / baseline engineering + dual KL 0.1 + 128 env | 在保留 baseline 更新密度和低 KL 对偶探索设置的前提下，将 `NumEnvs/BatchSize/ImagineBatchSize` 提高到 `128`，更充分利用 RTX 4090 | 运行中 | 已启动 tmux `dual_kl01_128env_long`，W&B run `riz27lm5`，环境数确认 `128`；当前观察已恢复 baseline 附近水平，暂未见明显异常 | `experiments/2026-06-12_128环境低KL对偶探索长训/` |
++| 2026-06-12 | 128环境KL003对偶探索诊断 | IsaacLab 2.2 / SurgicalRobot5 / baseline engineering + dual KL 0.03 + 128 env | 在不改变 `DualUpdate.Type=imagined_risk_return` 和 128 env 训练密度的前提下，将 `DualUpdate.KLCoeff` 从 `0.1` 降到 `0.03`，验证 dual 是否更倾向采集真实危险样本 | 运行中 | 已启动 tmux `dual_kl003_128env_long`，W&B run `it3qt1e8`，环境数确认 `128`；本 run 包含 `RecentCost/*` 最近窗口 source-aware cost 诊断，后续优先用它比较 main/dual 真实危险率 | `experiments/2026-06-12_128环境KL003对偶探索诊断/` |
++| 2026-06-12 | 128环境低KL对偶探索长训 | IsaacLab 2.2 / SurgicalRobot5 / baseline engineering + dual KL 0.1 + 128 env | 在保留 baseline 更新密度和低 KL 对偶探索设置的前提下，将 `NumEnvs/BatchSize/ImagineBatchSize` 提高到 `128`，更充分利用 RTX 4090 | 已停止 | tmux `dual_kl01_128env_long` / W&B run `riz27lm5` 已于 2026-06-12 17:22:50 CST 正常停止；停止原因是切换到 KL 0.03 最小改动对照实验 | `experiments/2026-06-12_128环境低KL对偶探索长训/` |
+ | 2026-06-12 | 低KL对偶探索诊断 | IsaacLab 2.2 / SurgicalRobot5 / baseline engineering + dual KL 0.1 | 将 `DualUpdate.KLCoeff` 从 `1.0` 降到 `0.1`，并新增 dual-main 动作距离日志，验证对偶策略是否能采到比主策略更危险的数据 | 已停止 | 64 env run `zkepnar4` 已于 2026-06-12 11:54:32 CST 正常停止；停止前约 `1.19M env steps`，后续切换到 128 env 长训 | `experiments/2026-06-12_低KL对偶探索诊断/` |
+ | 2026-06-12 | baseline工程优化长训 | IsaacLab 2.2 / SurgicalRobot5 / baseline + engineering | 保持 baseline 更新密度和 batch/env 参数，只启用 TF32、低频日志、timing、replay cache、sample_many、批量 critic latent encoding 等工程优化 | 已停止 | tmux `baseline_engineering_long` 已于 2026-06-12 11:16:19 CST 正常退出；停止前约 `7.26M env steps`，后续切换到低 KL 对偶探索诊断长训 | `experiments/2026-06-12_baseline工程优化长训/` |
+ | 2026-06-11 | 4090策略更新强度恢复验证 | IsaacLab 2.2 / SurgicalRobot5 / 4090 policy recovery | fast 模式策略学习偏弱后，验证恢复 agent/Gp/Gd/dual 更新强度是否能恢复夹取学习 | 已停止 | 首次 run `2hceqcms` 在约 105k env steps 异常停止；重启 run `c6400qld` 后约 `3.06M env steps` 仍未恢复旧 baseline 夹取学习表现，已手动停止并切换到 baseline 工程优化长训 | `experiments/2026-06-11_4090策略更新强度恢复验证/` |
+diff --git a/docs/research/PROJECT_STATE.md b/docs/research/PROJECT_STATE.md
+index 4f02fa1..78d05ba 100644
+--- a/docs/research/PROJECT_STATE.md
++++ b/docs/research/PROJECT_STATE.md
+@@ -3,34 +3,55 @@
+ ## 当前活跃版本
+ 
+ * FDPI Reachability Dreamer clean standalone 版本。
++
+ * 当前主训练入口：`scripts/train.sh` -> `fdpi_reachability_dreamer_isaaclab22/train.py` -> `fdpi_reachability_dreamer_isaaclab22/trainer.py`。
++
+ * 当前默认配置：`configs/reachability_gp_isaaclab22.yaml`。
++
+ * 当前默认任务：`SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1`，对应 entry point `surgical_robot5.env:SurgicalRobot5HeadPipeGraspGoalDreamerForceV1Env`。
++
+ * `scripts/train_isaaclab22.sh` 仅作为兼容转发脚本调用 `scripts/train.sh`；旧 IsaacLab 1.4 / UR3 Lite 启动接口已不再保留为默认入口。
++
+ * IsaacLab 2.2 迁移版已同步到 `fdpi-1`，远端项目目录为 `/root/gpufree-data/fdpi_reachability_dreamer_clean`，SurgicalRobot5 目录为 `/root/gpufree-data/surgical_robot5`，远端 IsaacLab 为 `/root/IsaacLab` 2.2.1。
+ 
+ ## 当前主要目标
+ 
+ * 在 IsaacLab 2.2 / SurgicalRobot5 任务中训练带安全可达性风险估计的 Dreamer 系统。
++
+ * 使用 `GpReachabilityCritic` 的 n-step reachability TD 目标，把未来危险触达信号传播到当前 latent-action。
++
+ * 通过 `GdRiskCritic` 和 dual policy 生成安全关键数据，提高高风险、边界风险片段在 replay 和训练中的覆盖。
++
+ * 通过 FDPI regime 将主策略 imagined rollout 分为 feasible / critical / infeasible，并在 reward 优化和风险约束之间动态权衡。
+ 
+ ## 当前最佳实验
+ 
+ * 实验名称：暂无收敛意义上的最佳训练结果。
++
+ * 最近工程验证：`2026-06-11_4090训练加速参数对比`。
++
+ * 实验目录：`experiments/2026-06-11_4090训练加速参数对比/`。
++
+ * 结果简述：在 RTX 4090 上完成 warmup 后带更新 profiling；baseline `213.49 env steps/s`，4090 balanced `520.89 env steps/s`，4090 fast `659.81 env steps/s`。fast 相对 baseline 总吞吐 `3.09x`，采样+更新相关耗时 `3.40x`，10M env steps 估算约 `4.21` 小时。该结果证明加速配置有效，但不代表最终收敛质量。
+ 
+ ## 当前主要问题
+ 
+ * 世界模型预测精度仍缺少系统验证。需要分别评估主策略数据分布与对偶策略数据分布下的动态、reward、continuous cost / binary cost 预测误差，明确主策略下的预测精度是否足以支撑 imagined rollout，以及对偶策略采样进入高风险区域后是否会显著放大模型误差。
++
+ * 对偶策略的数据采集收益尚未被实验证明。需要验证 dual policy 生成的危险数据是少量极端样本，还是覆盖了多样化的安全边界状态；同时需要与随机噪声或随机探索数据对比，确认引入对偶数据是否真的改善世界模型在高风险/对偶数据分布上的学习效果。
++
+ * 安全约束与任务奖励之间的平衡尚未稳定。当前 FDPI regime 中 reward 项、安全风险项和不同风险区间权重的协调关系还需要实验校准，重点观察主策略是否会因安全项过强而保守失效，或因 reward 项过强而忽视 reachability 风险。
+-* 目前还有的问题就是对偶策略并不能学到危险，初步怀疑是因为 KL 散度的更新权重大于 Gd 风险探索项，导致策略优先和主策略同步。已新增 `experiments/2026-06-12_低KL对偶探索诊断/`，用于测试 `DualUpdate.KLCoeff=0.1` 与 dual-main 动作距离日志。
++
++* 目前还有的问题就是对偶策略并不能学到危险，初步怀疑是因为 KL 散度的更新权重大于 Gd 风险探索项，导致策略优先和主策略同步。已新增 `experiments/2026-06-12_低KL对偶探索诊断/` 用于测试 `DualUpdate.KLCoeff=0.1` 与 dual-main 动作距离日志；当前已启动 `experiments/2026-06-12_128环境KL003对偶探索诊断/`，只将 128 env 配置的 `DualUpdate.KLCoeff` 降到 `0.03` 做最小改动对照，并通过 `RecentCost/*` 最近窗口指标避免 replay 早期历史污染。
++
+ * 目前证明了过早引入对偶策略会导致策略的学习速度大大降低，感觉可以做一个实验来验证是因为世界模型学习地效果变差导致地策略学习速度降低
+ 
++* 目前我认为还有的问题说是replaybuffer的处理，如果继续采用当前的replaybuffer，会不会有随着数据越来越多导致稀有数据的比例降低，导致世界模型采样到稀有数据的机会减小，对稀有数据的区域建模不准的问题。
++
++* 也就是说目前的对偶策略其实并没有过多地采样到危险区域，对偶策略的kl散度与危险的更新比例仍需要进一步调试
++
++* gd遇到了过高估计风险的情况，有可能是因为n步td导致对一些并不是非常危险的动作当做比较危险的动作，但是我认为这个可能也不是关键的问题，它的目的是最大危险，目前看来这个应该还是因为kl的比例问题导致gd的过高估计
++
+ ## 已废弃方案或版本
+ 
+ * 暂无明确废弃方案记录。README 表示共享组件已从早期实验折叠进当前 clean package，但没有保留可引用的旧版本说明。
+@@ -38,12 +59,21 @@
+ ## 下一步计划
+ 
+ * 首先是检测代码运行的速度，确定训练速度最快能到什么程度，争取在最大限度利用gpu下加快训练
++
+ * 优化策略熵的问题，思考这部分如何解决|
++
+ * 针对距离预测大的问题，思考如何解决
++
+ * IsaacLab 2.2 迁移版已在 fdpi-1 完成非零步短训练烟测；下一步可运行更长的云端训练速度测试和稳定性测试。
++
+ * 4090 fast/balanced 训练配置已完成 warmup 后带更新 profiling；fast 总吞吐约为 baseline `3.09x`，但 W&B 观察显示 fast 接近 `4M env steps` 仍未学会夹取，policy recovery 到约 `3.06M env steps` 仍未恢复旧 baseline 夹取学习表现。`experiments/2026-06-12_baseline工程优化长训/` 已于约 `7.26M env steps` 手动停止；64 env 低 KL 诊断 run 已于约 `1.19M env steps` 停止，当前切换到 128 env 长训以提高 GPU 利用率。
++
+ * `2026-06-11_危险区域世界模型50比50采样` 的 4090 fast+safety50 长训已停止，停止原因是策略学习明显偏弱；`2026-06-11_4090策略更新强度恢复验证` 已在约 `3.06M env steps` 手动停止。
+-* 当前活跃长训为 `experiments/2026-06-12_128环境低KL对偶探索长训/`，tmux 会话 `dual_kl01_128env_long`，W&B run `riz27lm5`。该 run 保留 baseline 更新密度，同时使用 `128 env + batch 128` 提高 4090 利用率；当前观察显示学习水平已恢复到 baseline 附近，暂未见明显训练异常。后续继续观察 `1M env steps` 前 reward 学习速度、warmup 后平均 GPU 利用率、`Replay/dual_cost_rate` 和 `DualAction/*` 指标。
++
++* 当前活跃长训为 `experiments/2026-06-12_128环境KL003对偶探索诊断/`，tmux 会话 `dual_kl003_128env_long`，W&B run `it3qt1e8`。旧的 KL 0.1 128 env run `riz27lm5` 已于 2026-06-12 17:22:50 CST 正常停止；新 run 保持 `DualUpdate.Type=imagined_risk_return` 和 128 env 训练密度，仅将 `DualUpdate.KLCoeff` 降到 `0.03`。后续重点观察 `RecentCost/main_binary_cost_rate`、`RecentCost/dual_binary_cost_rate`、`Dual/kl_loss`、`Dual/policy_loss`、`Dual/kl_to_main` 和 `DualAction/*`。
++
+ * `surgical_robot5` 已补充最小 `pyproject.toml` 以支持 pip 25 editable 安装；IsaacLab 2.2 中的 `quat_rotate` / `quat_rotate_inverse` deprecation warning 已通过替换为 `quat_apply` / `quat_apply_inverse` 清理。
++
+ * 新增实际训练实验时，在 `experiments/YYYY-MM-DD_中文实验名称/` 下归档配置、命令、日志、指标和实验记录。
++
+ * 对比 `ReachabilityH=3` 与 H=5、`binary_cost` 与 `continuous_cost` 作为 `Gp` target 信号的效果。
+diff --git a/fdpi_reachability_dreamer_isaaclab22/sampling.py b/fdpi_reachability_dreamer_isaaclab22/sampling.py
+index 4455186..5d77377 100644
+--- a/fdpi_reachability_dreamer_isaaclab22/sampling.py
++++ b/fdpi_reachability_dreamer_isaaclab22/sampling.py
+@@ -72,6 +72,97 @@ class FDPIRegimeStats:
+     count: int = 0
+ 
+ 
++class SourceCostStatsWindow:
++    def __init__(self, maxlen: int):
++        self.maxlen = max(int(maxlen), 1)
++        self.rows: deque[dict[str, torch.Tensor | int]] = deque()
++        self.total = 0
++        self.sums: dict[str, torch.Tensor] = {}
++
++    def append(
++        self,
++        *,
++        source: torch.Tensor,
++        continuous_cost: torch.Tensor,
++        binary_cost: torch.Tensor,
++        extreme_cost: torch.Tensor | None = None,
++    ) -> None:
++        source = torch.as_tensor(source).detach().reshape(-1).to(torch.int64)
++        continuous_cost = torch.as_tensor(continuous_cost, device=source.device).detach().reshape(-1)
++        binary_cost = torch.as_tensor(binary_cost, device=source.device).detach().reshape(-1)
++        if extreme_cost is None:
++            extreme_cost = torch.zeros_like(binary_cost)
++        else:
++            extreme_cost = torch.as_tensor(extreme_cost, device=source.device).detach().reshape(-1)
++
++        main_mask = source == SOURCE_MAIN
++        dual_mask = source == SOURCE_DUAL
++        main_float = main_mask.to(dtype=torch.float32)
++        dual_float = dual_mask.to(dtype=torch.float32)
++        binary_positive = (binary_cost > 0.0).to(dtype=torch.float32)
++        extreme_positive = (extreme_cost > 0.0).to(dtype=torch.float32)
++        row = {
++            "total": int(source.numel()),
++            "main_total": main_float.sum(),
++            "dual_total": dual_float.sum(),
++            "main_binary_cost": (binary_positive * main_float).sum(),
++            "dual_binary_cost": (binary_positive * dual_float).sum(),
++            "main_continuous_cost": (continuous_cost.float() * main_float).sum(),
++            "dual_continuous_cost": (continuous_cost.float() * dual_float).sum(),
++            "main_extreme_cost": (extreme_positive * main_float).sum(),
++            "dual_extreme_cost": (extreme_positive * dual_float).sum(),
++        }
++        self.rows.append(row)
++        self._add(row)
++        while self.total > self.maxlen and len(self.rows) > 1:
++            self._subtract(self.rows.popleft())
++
++    def _add(self, row: dict[str, torch.Tensor | int]) -> None:
++        self.total += int(row["total"])
++        for key, value in row.items():
++            if key == "total":
++                continue
++            value = torch.as_tensor(value).detach()
++            if key not in self.sums:
++                self.sums[key] = value.clone()
++            else:
++                self.sums[key] = self.sums[key] + value.to(device=self.sums[key].device)
++
++    def _subtract(self, row: dict[str, torch.Tensor | int]) -> None:
++        self.total -= int(row["total"])
++        for key, value in row.items():
++            if key == "total" or key not in self.sums:
++                continue
++            value = torch.as_tensor(value).detach().to(device=self.sums[key].device)
++            self.sums[key] = self.sums[key] - value
++
++    def stats(self) -> dict[str, float]:
++        def value(key: str) -> float:
++            item = self.sums.get(key)
++            if item is None:
++                return 0.0
++            return float(item.detach().float().item())
++
++        main_total_value = value("main_total")
++        dual_total_value = value("dual_total")
++        total = max(float(self.total), 1.0)
++        main_total = max(main_total_value, 1.0)
++        dual_total = max(dual_total_value, 1.0)
++        return {
++            "window_count": float(self.total),
++            "main_count": main_total_value,
++            "dual_count": dual_total_value,
++            "main_ratio": main_total_value / total,
++            "dual_ratio": dual_total_value / total,
++            "main_binary_cost_rate": value("main_binary_cost") / main_total,
++            "dual_binary_cost_rate": value("dual_binary_cost") / dual_total,
++            "main_continuous_cost_mean": value("main_continuous_cost") / main_total,
++            "dual_continuous_cost_mean": value("dual_continuous_cost") / dual_total,
++            "main_extreme_cost_rate": value("main_extreme_cost") / main_total,
++            "dual_extreme_cost_rate": value("dual_extreme_cost") / dual_total,
++        }
++
++
+ class FDPIRegimeStatsWindow:
+     def __init__(self, maxlen: int):
+         self.maxlen = max(int(maxlen), 1)
+diff --git a/fdpi_reachability_dreamer_isaaclab22/trainer.py b/fdpi_reachability_dreamer_isaaclab22/trainer.py
+index c263c25..bc9a214 100644
+--- a/fdpi_reachability_dreamer_isaaclab22/trainer.py
++++ b/fdpi_reachability_dreamer_isaaclab22/trainer.py
+@@ -31,7 +31,7 @@ from .cost_utils import (
+ )
+ from .dual_update import update_dual
+ from .modules.world_models import predict_force_from_outputs
+-from .sampling import FDPIRegimeStatsWindow, batch_composition, dual_ratio_from_fdpi_stats
++from .sampling import FDPIRegimeStatsWindow, SourceCostStatsWindow, batch_composition, dual_ratio_from_fdpi_stats
+ from .trainer_base import (
+     OfflineEpisodeWriter,
+     _extract_force_obs,
+@@ -845,7 +845,9 @@ def joint_train_fdpi(
+         replay_buffer.cache_starts = _cfg_bool(performance_cfg, "CacheReplayStarts", True)
+     pf = _cfg_float(risk_cfg, "Pf", 0.10)
+     cg = _cfg_float(risk_cfg, "Cg", 0.03)
+-    feasible_window = FDPIRegimeStatsWindow(_cfg_int(dual_sampling_cfg, "FeasibleRatioWindow", 10000))
++    recent_cost_window_len = _cfg_int(dual_sampling_cfg, "FeasibleRatioWindow", 10000)
++    feasible_window = FDPIRegimeStatsWindow(recent_cost_window_len)
++    recent_cost_window = SourceCostStatsWindow(recent_cost_window_len)
+ 
+     model_update_count = 0
+     agent_update_count = 0
+@@ -1005,6 +1007,12 @@ def joint_train_fdpi(
+                 pf=pf,
+                 cg=cg,
+             )
++        recent_cost_window.append(
++            source=source,
++            continuous_cost=continuous_cost,
++            binary_cost=binary_cost,
++            extreme_cost=extreme_cost,
++        )
+ 
+         terminal = torch.as_tensor(
+             next_obs_dict.get("is_terminal", torch.zeros_like(done, dtype=torch.int32)),
+@@ -1066,6 +1074,9 @@ def joint_train_fdpi(
+         episode_len += 1.0
+         step_logger.log_lazy("Main/continuous_cost_mean", lambda: continuous_cost.float().mean().item(), env_steps)
+         step_logger.log_lazy("Dual/source_count", lambda: float((source == SOURCE_DUAL).sum().item()), env_steps)
++        if step_logger.enabled(env_steps):
++            for key, value in recent_cost_window.stats().items():
++                logger.log(f"RecentCost/{key}", value, env_steps)
+         if step_logger.enabled(env_steps) and bool((source == SOURCE_DUAL).any().item()):
+             step_logger.log(
+                 "Dual/real_cost_mean",
+diff --git a/tests/test_reachability_gp.py b/tests/test_reachability_gp.py
+index 09887ce..9d27c38 100644
+--- a/tests/test_reachability_gp.py
++++ b/tests/test_reachability_gp.py
+@@ -376,6 +376,33 @@ class ReachabilityGpTests(unittest.TestCase):
+         self.assertIn("sample_l2_to_main_mean", info)
+         self.assertIn("logprob_gap", info)
+ 
++    def test_isaaclab22_source_cost_window_tracks_recent_source_costs(self):
++        from fdpi_reachability_dreamer_isaaclab22.cost_utils import SOURCE_DUAL, SOURCE_MAIN
++        from fdpi_reachability_dreamer_isaaclab22.sampling import SourceCostStatsWindow
++
++        window = SourceCostStatsWindow(maxlen=4)
++        window.append(
++            source=torch.tensor([[SOURCE_MAIN], [SOURCE_DUAL], [SOURCE_MAIN]]),
++            continuous_cost=torch.tensor([[0.0], [0.5], [1.0]]),
++            binary_cost=torch.tensor([[0.0], [1.0], [1.0]]),
++            extreme_cost=torch.tensor([[0.0], [0.0], [1.0]]),
++        )
++        window.append(
++            source=torch.tensor([[SOURCE_DUAL], [SOURCE_DUAL]]),
++            continuous_cost=torch.tensor([[0.0], [1.0]]),
++            binary_cost=torch.tensor([[0.0], [1.0]]),
++            extreme_cost=torch.tensor([[0.0], [1.0]]),
++        )
++
++        stats = window.stats()
++        self.assertEqual(stats["window_count"], 2.0)
++        self.assertEqual(stats["main_count"], 0.0)
++        self.assertEqual(stats["dual_count"], 2.0)
++        self.assertEqual(stats["main_binary_cost_rate"], 0.0)
++        self.assertAlmostEqual(stats["dual_binary_cost_rate"], 0.5)
++        self.assertAlmostEqual(stats["dual_continuous_cost_mean"], 0.5)
++        self.assertAlmostEqual(stats["dual_extreme_cost_rate"], 0.5)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

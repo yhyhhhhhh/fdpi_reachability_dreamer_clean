@@ -72,6 +72,97 @@ class FDPIRegimeStats:
     count: int = 0
 
 
+class SourceCostStatsWindow:
+    def __init__(self, maxlen: int):
+        self.maxlen = max(int(maxlen), 1)
+        self.rows: deque[dict[str, torch.Tensor | int]] = deque()
+        self.total = 0
+        self.sums: dict[str, torch.Tensor] = {}
+
+    def append(
+        self,
+        *,
+        source: torch.Tensor,
+        continuous_cost: torch.Tensor,
+        binary_cost: torch.Tensor,
+        extreme_cost: torch.Tensor | None = None,
+    ) -> None:
+        source = torch.as_tensor(source).detach().reshape(-1).to(torch.int64)
+        continuous_cost = torch.as_tensor(continuous_cost, device=source.device).detach().reshape(-1)
+        binary_cost = torch.as_tensor(binary_cost, device=source.device).detach().reshape(-1)
+        if extreme_cost is None:
+            extreme_cost = torch.zeros_like(binary_cost)
+        else:
+            extreme_cost = torch.as_tensor(extreme_cost, device=source.device).detach().reshape(-1)
+
+        main_mask = source == SOURCE_MAIN
+        dual_mask = source == SOURCE_DUAL
+        main_float = main_mask.to(dtype=torch.float32)
+        dual_float = dual_mask.to(dtype=torch.float32)
+        binary_positive = (binary_cost > 0.0).to(dtype=torch.float32)
+        extreme_positive = (extreme_cost > 0.0).to(dtype=torch.float32)
+        row = {
+            "total": int(source.numel()),
+            "main_total": main_float.sum(),
+            "dual_total": dual_float.sum(),
+            "main_binary_cost": (binary_positive * main_float).sum(),
+            "dual_binary_cost": (binary_positive * dual_float).sum(),
+            "main_continuous_cost": (continuous_cost.float() * main_float).sum(),
+            "dual_continuous_cost": (continuous_cost.float() * dual_float).sum(),
+            "main_extreme_cost": (extreme_positive * main_float).sum(),
+            "dual_extreme_cost": (extreme_positive * dual_float).sum(),
+        }
+        self.rows.append(row)
+        self._add(row)
+        while self.total > self.maxlen and len(self.rows) > 1:
+            self._subtract(self.rows.popleft())
+
+    def _add(self, row: dict[str, torch.Tensor | int]) -> None:
+        self.total += int(row["total"])
+        for key, value in row.items():
+            if key == "total":
+                continue
+            value = torch.as_tensor(value).detach()
+            if key not in self.sums:
+                self.sums[key] = value.clone()
+            else:
+                self.sums[key] = self.sums[key] + value.to(device=self.sums[key].device)
+
+    def _subtract(self, row: dict[str, torch.Tensor | int]) -> None:
+        self.total -= int(row["total"])
+        for key, value in row.items():
+            if key == "total" or key not in self.sums:
+                continue
+            value = torch.as_tensor(value).detach().to(device=self.sums[key].device)
+            self.sums[key] = self.sums[key] - value
+
+    def stats(self) -> dict[str, float]:
+        def value(key: str) -> float:
+            item = self.sums.get(key)
+            if item is None:
+                return 0.0
+            return float(item.detach().float().item())
+
+        main_total_value = value("main_total")
+        dual_total_value = value("dual_total")
+        total = max(float(self.total), 1.0)
+        main_total = max(main_total_value, 1.0)
+        dual_total = max(dual_total_value, 1.0)
+        return {
+            "window_count": float(self.total),
+            "main_count": main_total_value,
+            "dual_count": dual_total_value,
+            "main_ratio": main_total_value / total,
+            "dual_ratio": dual_total_value / total,
+            "main_binary_cost_rate": value("main_binary_cost") / main_total,
+            "dual_binary_cost_rate": value("dual_binary_cost") / dual_total,
+            "main_continuous_cost_mean": value("main_continuous_cost") / main_total,
+            "dual_continuous_cost_mean": value("dual_continuous_cost") / dual_total,
+            "main_extreme_cost_rate": value("main_extreme_cost") / main_total,
+            "dual_extreme_cost_rate": value("dual_extreme_cost") / dual_total,
+        }
+
+
 class FDPIRegimeStatsWindow:
     def __init__(self, maxlen: int):
         self.maxlen = max(int(maxlen), 1)

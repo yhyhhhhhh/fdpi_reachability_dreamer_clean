@@ -1,6 +1,6 @@
 date: "2026-06-12"
 name: "128环境低KL对偶探索长训"
-status: "运行中"
+status: "已停止"
 objective: "在保留 baseline 更新密度和低 KL 对偶探索设置的前提下，将 NumEnvs/BatchSize/ImagineBatchSize 提高到 128，以更充分利用 RTX 4090。"
 command: "bash experiments/2026-06-12_128环境低KL对偶探索长训/运行命令.sh"
 tmux_command: "bash experiments/2026-06-12_128环境低KL对偶探索长训/启动tmux长训.sh"
@@ -24,6 +24,9 @@ directories:
 tmux:
   session: "dual_kl01_128env_long"
   started_at: "2026-06-12 11:55:31 CST"
+  stopped_at: "2026-06-12 17:22:50 CST"
+  exit_status: 0
+  stop_reason: "为切换到 DualUpdate.KLCoeff=0.03 的最小改动对照实验而主动停止"
   run_id: "dual_kl01_128env_20260612_115531"
   log: "experiments/2026-06-12_128环境低KL对偶探索长训/日志/tmux训练_dual_kl01_128env_20260612_115531.log"
   checkpoint_dir: "experiments/2026-06-12_128环境低KL对偶探索长训/检查点/fdpi-baseline-engineering-dual-kl01-128env/dual_kl01_128env_20260612_115531"

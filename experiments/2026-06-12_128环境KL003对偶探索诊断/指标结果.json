@@ -1,0 +1,14 @@
+{
+  "status": "running",
+  "date": "2026-06-12",
+  "experiment": "128环境KL003对偶探索诊断",
+  "source_config": "configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl003_128env.yaml",
+  "baseline_experiment": "experiments/2026-06-12_128环境低KL对偶探索长训/",
+  "run_id": "dual_kl003_128env_20260612_172433",
+  "tmux_session": "dual_kl003_128env_long",
+  "started_at": "2026-06-12 17:24:33 CST",
+  "log": "experiments/2026-06-12_128环境KL003对偶探索诊断/日志/tmux训练_dual_kl003_128env_20260612_172433.log",
+  "checkpoint_dir": "experiments/2026-06-12_128环境KL003对偶探索诊断/检查点/fdpi-baseline-engineering-dual-kl003-128env/dual_kl003_128env_20260612_172433",
+  "wandb_run": "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/it3qt1e8",
+  "notes": "KL 0.03 长训已启动；后续优先观察 RecentCost/*、Dual/kl_loss、Dual/policy_loss、Dual/kl_to_main 和 DualAction/*。"
+}

@@ -1,0 +1,8 @@
+BaseConfig: reachability_gp_isaaclab22_baseline_engineering_dual_kl01_128env.yaml
+
+Wandb:
+  Name: "FDPI-reachability-gp-IsaacLab22-SurgicalRobot5-baseline-engineering-dual-kl003-128env"
+
+FDPIRegimeDreamer:
+  DualUpdate:
+    KLCoeff: 0.03

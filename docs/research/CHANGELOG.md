@@ -2,6 +2,174 @@
 
 ## 2026-06-12
 
+### LOGIC_CHANGE：尊重 Gp.Enable 关闭态的主策略训练路径
+
+修改内容：
+- 训练循环新增 `gp_enabled` gating。
+- 当 `FDPIRegimeDreamer.Gp.Enable=false` 时，rollout 不再用 Gp critic 计算 `g_main` 和 feasible window，主策略更新也不再把 Gp critic 传入 `train_agent_step(...)`。
+
+修改原因：
+- 新增无 FDPI / 无对偶采样 baseline 时，需要确保关闭 Gp 后不会隐式使用 reachability critic 参与 rollout 诊断或主策略更新路径。
+
+影响：
+- 默认配置中 `Gp.Enable=true`，旧实验行为不变。
+- 仅影响显式设置 `Gp.Enable=false` 的配置；这类配置会更接近普通 Dreamer actor-critic baseline。
+
+验证方式：
+- 已通过：配置加载检查确认新 baseline 中 `Gp.Enable=false`、`MainFDPIRegime.Enable=false`、`DualSampling.Enable=false`。
+- 已通过：`python -m py_compile fdpi_reachability_dreamer_isaaclab22/trainer.py`。
+
+相关实验：
+- `experiments/2026-06-12_128环境无FDPI无对偶采样基线/`
+
+---
+
+### CONFIG_CHANGE：新增 128 环境无 FDPI 无对偶采样 baseline 配置
+
+修改内容：
+- 新增 `configs/reachability_gp_isaaclab22_baseline_engineering_no_fdpi_no_dual_128env.yaml`。
+- 该配置继承 `baseline_engineering_dual_kl01_128env` 的 128 env、batch 128 和 baseline-engineering 训练密度。
+- 显式关闭 `MainFDPIRegime.Enable`、`Gp.Enable`、`Gd.Enable`、`DualSampling.Enable` 和 `DualUpdate.Enable`。
+- 保留 `WorldModelEval.Enable=true`，便于和 FDPI+dual run 直接比较 world model 预测质量。
+
+修改原因：
+- 需要一个真实可跑的对照训练入口，用于判断 FDPI 与对偶采样是否降低主任务区域建模质量和主策略学习速度。
+
+影响：
+- 默认训练配置不变。
+- 新配置会训练普通 Dreamer 主策略和 world model，不更新安全 critic / dual policy，不向 replay 混入 dual 来源样本。
+
+验证方式：
+- 已通过：配置加载检查确认 128 env 与关键关闭项生效。
+- 已通过：`bash -n experiments/2026-06-12_128环境无FDPI无对偶采样基线/运行命令.sh experiments/2026-06-12_128环境无FDPI无对偶采样基线/启动tmux长训.sh`。
+
+相关实验：
+- `experiments/2026-06-12_128环境无FDPI无对偶采样基线/`
+
+---
+
+### EXPERIMENT_ONLY：新增 128 环境无 FDPI 无对偶采样 baseline 训练入口
+
+修改内容：
+- 新增实验目录 `experiments/2026-06-12_128环境无FDPI无对偶采样基线/`。
+- 新增 `运行命令.sh`、`启动tmux长训.sh`、`配置.yaml`、`参数说明.md`、`实验清单.yaml`、`实验记录.md`、`指标结果.json`、`配置快照/` 和 `代码变更.patch`。
+
+修改原因：
+- 将无 FDPI / 无对偶采样 baseline 沉淀为可复现短命令，便于和当前 KL003 对偶探索诊断 run 做直接对比。
+
+影响：
+- 可通过 `bash experiments/2026-06-12_128环境无FDPI无对偶采样基线/启动tmux长训.sh` 启动独立 tmux 长训。
+- 输出、日志和 checkpoint 独立保存到该实验目录。
+
+验证方式：
+- 已通过：实验目录结构和配置快照已创建。
+- 已通过：启动脚本 shell 语法检查。
+
+相关实验：
+- `experiments/2026-06-12_128环境无FDPI无对偶采样基线/`
+
+---
+
+### LOGIC_CHANGE：新增低频 WorldModelEval 主/对偶分布评估
+
+修改内容：
+- 新增 `FDPIRegimeDreamer.WorldModelEval` 配置块，默认 `Enable=false`，支持一键开启/关闭训练中低频 world model 评估。
+- 新增 `run_world_model_eval(...)`，每跨过 `StartStep + k * EverySteps` 阈值后在 replay 上评估一次，避免 `env_steps` 与 `1M` 不整除导致漏评估。
+- 新增 `WMEval/{split}/...` 指标，按 `all/main/dual` 以及可选 cost 区间统计 posterior、one-step prior、open-loop 多 horizon 的 reward/cost/extreme/force/done 预测误差。
+- 新增 `WMEvalGap/dual_minus_main/*`，用于直接观察 dual 分布相对 main 分布的 world model 误差差距。
+- 在 `configs/reachability_gp_isaaclab22.yaml` 中显式加入关闭态配置；在 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl003_128env.yaml` 中开启 `WorldModelEval.Enable=true`。
+
+修改原因：
+- 当前需要判断对偶策略采样是否让 world model 对 main 任务区域或 dual 高风险区域的预测质量发生变化，仅看训练 loss 和 replay 全局统计不够直接。
+- 低频评估可以在不明显影响长训吞吐的情况下，持续观察 world model 对 main/dual 分布的拟合、one-step dynamics 和 open-loop imagination 质量。
+
+影响：
+- 默认关闭，不改变旧配置训练行为。
+- 开启后每 `1M env steps` 左右额外采样 replay 并执行一次 `torch.no_grad()` 评估，只记录 W&B 指标，不更新模型、不修改 replay、不保存额外文件。
+- 当前 KL003 诊断配置的新 run 会自动记录 `WMEval/*` 指标；已在运行中的 run 不会自动生效，需要重启。
+
+验证方式：
+- 已通过：`python -m py_compile fdpi_reachability_dreamer_isaaclab22/trainer.py fdpi_reachability_dreamer_isaaclab22/train.py tests/test_reachability_gp.py`。
+- 已通过：`python -m unittest tests.test_reachability_gp`。
+- 已通过：轻量 fake replay / fake world model 调用 `run_world_model_eval(...)`，确认会产出 main/dual posterior 与 open-loop 指标。
+
+相关实验：
+- `experiments/2026-06-12_128环境KL003对偶探索诊断/`
+
+---
+
+### LOGIC_CHANGE：新增最近窗口 source-aware 真实 cost 诊断
+
+修改内容：
+- 新增 `SourceCostStatsWindow`，按最近窗口同时统计 main / dual 来源样本的 `binary_cost`、`continuous_cost`、`extreme_cost` 和来源占比。
+- 训练循环每个环境步将当前 `source`、`continuous_cost`、`binary_cost`、`extreme_cost` 写入最近窗口。
+- 按 `LogEverySteps` 新增 W&B 指标 `RecentCost/*`，包括 `main_binary_cost_rate`、`dual_binary_cost_rate`、`main_continuous_cost_mean`、`dual_continuous_cost_mean`、`main_extreme_cost_rate`、`dual_extreme_cost_rate`、`main_ratio`、`dual_ratio`、`main_count`、`dual_count` 和 `window_count`。
+- 窗口长度复用 `DualSampling.FeasibleRatioWindow`，当前主线配置为最近 `10000` 个环境样本。
+
+修改原因：
+- `Replay/main_cost_rate` / `Replay/dual_cost_rate` 是全 replay buffer 历史统计，main 来源会包含 `1M env steps` 前未启用安全优化和 dual 对照的数据。
+- 直接用全 replay 的 main/dual cost rate 判断当前 dual 是否更危险不够公平，需要同一最近窗口下的 source-aware 真实 cost 对比。
+
+影响：
+- 不改变训练采样、replay 内容、loss 或优化步骤。
+- 新指标用于诊断当前 rollout 中 main 与 dual 的真实危险率，避免被早期 replay 历史污染。
+- 已在运行中的训练不会自动出现该指标，需要重启新 run 后生效。
+
+验证方式：
+- 已通过：`python -m py_compile fdpi_reachability_dreamer_isaaclab22/sampling.py fdpi_reachability_dreamer_isaaclab22/trainer.py`。
+- 已通过：`python -m unittest tests.test_reachability_gp`。
+
+相关实验：
+- 后续重启 `experiments/2026-06-12_128环境低KL对偶探索长训/` 或启动 `experiments/2026-06-12_128环境KL003对偶探索诊断/` 后生效。
+
+---
+
+### CONFIG_CHANGE：新增 128 环境 KL 0.03 对偶探索诊断配置
+
+修改内容：
+- 新增 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl003_128env.yaml`。
+- 该配置继承 `baseline_engineering_dual_kl01_128env`，仅将 `FDPIRegimeDreamer.DualUpdate.KLCoeff` 从 `0.1` 降到 `0.03`。
+- 保持 `DualUpdate.Type=imagined_risk_return`、128 env、batch 128、更新触发频率和 Gd/Dual 延后到 `1M env steps` 等设置不变。
+
+修改原因：
+- 当前 W&B run `riz27lm5` 中 `Dual/kl_loss` 仍显著大于 `Dual/policy_loss`，且 `Replay/dual_cost_rate` 低于 `Replay/main_cost_rate`。
+- 用户希望先采用最小改动继续降低 KL，而不是切换到 `max_risk` 目标。
+
+影响：
+- 默认配置不变。
+- 新实验可用于判断仅降低 KL 是否能提升 dual 真实危险采样率。
+
+验证方式：
+- 已通过：配置文件静态检查确认新配置仅覆盖 `DualUpdate.KLCoeff=0.03`。
+- 已通过：`bash -n experiments/2026-06-12_128环境KL003对偶探索诊断/运行命令.sh experiments/2026-06-12_128环境KL003对偶探索诊断/启动tmux长训.sh`。
+
+相关实验：
+- `experiments/2026-06-12_128环境KL003对偶探索诊断/`
+
+---
+
+### EXPERIMENT_ONLY：新增 128 环境 KL 0.03 对偶探索诊断入口
+
+修改内容：
+- 新增实验目录 `experiments/2026-06-12_128环境KL003对偶探索诊断/`。
+- 新增 `运行命令.sh`、`启动tmux长训.sh`、`配置.yaml`、`参数说明.md`、`实验清单.yaml`、`实验记录.md`、`指标结果.json` 和配置快照。
+
+修改原因：
+- 将 KL 0.03 对偶探索诊断沉淀为可复现短命令，便于和当前 KL 0.1 的 128 env run 做直接对照。
+
+影响：
+- 可通过 `bash experiments/2026-06-12_128环境KL003对偶探索诊断/启动tmux长训.sh` 启动独立 tmux 长训。
+- 输出、日志和 checkpoint 独立保存到该实验目录，不影响当前 KL 0.1 长训。
+
+验证方式：
+- 已通过：实验目录结构和配置快照已创建。
+- 已通过：启动脚本 shell 语法检查。
+
+相关实验：
+- `experiments/2026-06-12_128环境KL003对偶探索诊断/`
+
+---
+
 ### LOGIC_CHANGE：降低正式训练中的非关键指标同步开销
 
 修改内容：

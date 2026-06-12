@@ -1,0 +1,30 @@
+BaseConfig: reachability_gp_isaaclab22_baseline_engineering_dual_kl01_128env.yaml
+
+Wandb:
+  Name: "Dreamer-no-fdpi-no-dual-IsaacLab22-SurgicalRobot5-baseline-engineering-128env"
+
+FDPIRegimeDreamer:
+  Gp:
+    Enable: false
+
+  Gd:
+    Enable: false
+
+  MainFDPIRegime:
+    Enable: false
+
+  DualSampling:
+    Enable: false
+    RatioFea95: 0.0
+    RatioFea90: 0.0
+    RatioFea80: 0.0
+    RatioCriticalHigh: 0.0
+    RatioUnsafeHigh: 0.0
+    RatioDefault: 0.0
+
+  DualUpdate:
+    Enable: false
+    UpdateSteps: 0
+
+  WorldModelEval:
+    Enable: true

@@ -1,0 +1,70 @@
+实验:
+  名称: "128环境无FDPI无对偶采样基线"
+  日期: "2026-06-12"
+  目的: "建立真实训练 baseline：保持 128 env 与 baseline-engineering 训练密度，关闭 FDPI regime、Gp/Gd critic 更新、dual policy 更新和 dual rollout 采样，用于和当前 FDPI+dual 实验比较任务学习与 world model 预测质量。"
+  输出目录: "experiments/2026-06-12_128环境无FDPI无对偶采样基线"
+
+运行:
+  tmux_session: "no_fdpi_no_dual_128env_long"
+  seed: 0
+  device: "cuda:0"
+  env_name: "SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1"
+  num_envs: 128
+
+训练:
+  total_env_steps: 10000000
+  buffer_warmup_env_steps: 51200
+  batch_size: 128
+  batch_length: 64
+  imagine_batch_size: 128
+  imagine_context: 16
+  imagine_horizon: 15
+  train_model_every_steps: 256
+  train_agent_every_steps: 256
+  model_update: 4
+  agent_update: 4
+
+关闭项:
+  main_fdpi_regime_enable: false
+  gp_enable: false
+  gd_enable: false
+  dual_sampling_enable: false
+  dual_update_enable: false
+  预期现象:
+    - "MainFDPI/enabled 应保持 0。"
+    - "Dual/source_count 应保持 0。"
+    - "Replay/source_dual_ratio 应保持 0。"
+    - "Train/gp_updates、Train/gd_updates、Train/dual_updates 应保持 0。"
+
+保留项:
+  continuous_cost: true
+  force_head: true
+  cost_head: true
+  world_model_safety_critical_sampling: true
+  说明: "该 baseline 仍训练 world model 的 reward/cost/force 预测头，并保留 replay 中 cost 字段，便于直接比较世界模型质量；但这些安全信号不再用于主策略 FDPI 约束或 dual 采样。"
+
+世界模型评估:
+  enable: true
+  start_step: 1000000
+  every_steps: 1000000
+  num_batches: 4
+  batch_size: 256
+  eval_length: 48
+  context_length: 16
+  horizons: [1, 3, 5, 10, 15, 30]
+  说明: "无 dual 采样时 WMEval/dual 样本数预计为 0；主要用于比较 all/main 与 FDPI+dual run 中 main/dual 的预测误差。"
+
+工程优化:
+  amp: true
+  tf32: true
+  replay_start_cache: true
+  sample_many: true
+  batched_critic_latent_encoding: true
+  timing_log_every_steps: 0
+  log_every_steps: 8192
+
+日志:
+  wandb_mode: "online"
+  run_name: "dreamer-no-fdpi-no-dual-128env"
+  checkpoint_dir: "experiments/2026-06-12_128环境无FDPI无对偶采样基线/检查点"
+  log_dir: "experiments/2026-06-12_128环境无FDPI无对偶采样基线/日志"

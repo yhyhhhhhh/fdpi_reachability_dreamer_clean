@@ -1,0 +1,6 @@
+{
+  "status": "pending",
+  "summary": "实验入口已准备，尚未启动训练。",
+  "wandb_run": null,
+  "key_metrics": {}
+}

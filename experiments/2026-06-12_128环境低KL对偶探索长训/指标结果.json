@@ -1,7 +1,9 @@
 {
-  "status": "running",
+  "status": "stopped",
   "wandb_run": "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/riz27lm5",
   "run_id": "dual_kl01_128env_20260612_115531",
   "tmux_session": "dual_kl01_128env_long",
-  "summary": "128 env 长训已启动；当前观察显示训练水平已恢复到 baseline 附近，暂未见明显异常，后续继续观察平均 GPU 利用率、吞吐和 1M 前 reward 学习速度。"
+  "stopped_at": "2026-06-12 17:22:50 CST",
+  "exit_status": 0,
+  "summary": "128 env KL 0.1 长训已主动停止，用于切换到 KL 0.03 对照实验；停止前训练水平恢复到 baseline 附近，暂未见明显训练异常。"
 }

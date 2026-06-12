@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import random
 import time
+from collections import defaultdict
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 try:
@@ -31,7 +33,7 @@ from .cost_utils import (
 )
 from .dual_update import update_dual
 from .modules.world_models import predict_force_from_outputs
-from .sampling import FDPIRegimeStatsWindow, batch_composition, dual_ratio_from_fdpi_stats
+from .sampling import FDPIRegimeStatsWindow, SourceCostStatsWindow, batch_composition, dual_ratio_from_fdpi_stats
 from .trainer_base import (
     OfflineEpisodeWriter,
     _extract_force_obs,
@@ -63,6 +65,16 @@ def _cfg_int_tuple(node, name, default=()):
 
 def _node(fdpi_cfg, name):
     return cfg_get(fdpi_cfg, name, None)
+
+
+def _as_positive_int_list(value, default):
+    if value is None:
+        value = default
+    if isinstance(value, (int, float)):
+        values = [int(value)]
+    else:
+        values = [int(v) for v in value]
+    return sorted({v for v in values if v > 0})
 
 
 class _TrainTimer:
@@ -121,6 +133,175 @@ class _EveryNStepLogger:
     def log_video(self, tag, value, step):
         if self.logger is not None and self.enabled(step):
             self.logger.log_video(tag, value, step)
+
+
+class _WorldModelEvalScheduler:
+    def __init__(self, *, enabled, start_step, every_steps, initial_step=0):
+        self.enabled = bool(enabled)
+        self.start_step = int(start_step)
+        self.every_steps = max(int(every_steps), 1)
+        self.next_step = self.start_step
+        initial_step = int(initial_step)
+        if initial_step >= self.next_step:
+            passed = (initial_step - self.start_step) // self.every_steps + 1
+            self.next_step = self.start_step + passed * self.every_steps
+
+    def should_run(self, step):
+        return self.enabled and int(step) >= self.next_step
+
+    def mark_ran(self, step):
+        step = int(step)
+        while self.next_step <= step:
+            self.next_step += self.every_steps
+
+
+def _mean_or_none(value):
+    if value is None:
+        return None
+    value = torch.as_tensor(value)
+    if value.numel() == 0:
+        return None
+    finite = torch.isfinite(value.float())
+    if not finite.any():
+        return None
+    return float(value.float()[finite].mean().detach().cpu().item())
+
+
+def _average_precision_from_tensors(label, score):
+    label = torch.as_tensor(label).detach().float().reshape(-1)
+    score = torch.as_tensor(score).detach().float().reshape(-1)
+    finite = torch.isfinite(label) & torch.isfinite(score)
+    label = label[finite]
+    score = score[finite]
+    positive = label > 0.5
+    num_pos = int(positive.sum().item())
+    if label.numel() == 0 or num_pos == 0:
+        return None
+    order = torch.argsort(score, descending=True)
+    sorted_label = positive[order].float()
+    tp = torch.cumsum(sorted_label, dim=0)
+    fp = torch.cumsum(1.0 - sorted_label, dim=0)
+    precision = tp / (tp + fp).clamp_min(1.0)
+    recall = tp / float(num_pos)
+    prev_recall = torch.cat([torch.zeros(1, device=recall.device), recall[:-1]])
+    return float(((recall - prev_recall) * precision).sum().detach().cpu().item())
+
+
+def _binary_metrics_from_tensors(label, prob):
+    label = torch.as_tensor(label).detach().float().reshape(-1)
+    prob = torch.as_tensor(prob).detach().float().reshape(-1)
+    finite = torch.isfinite(label) & torch.isfinite(prob)
+    label = label[finite]
+    prob = prob[finite]
+    if label.numel() == 0:
+        return {}
+    pred = prob >= 0.5
+    positive = label > 0.5
+    negative = ~positive
+    tp = (pred & positive).sum().float()
+    fp = (pred & negative).sum().float()
+    fn = ((~pred) & positive).sum().float()
+    precision = tp / (tp + fp).clamp_min(1.0)
+    recall = tp / (tp + fn).clamp_min(1.0)
+    f1 = 2.0 * precision * recall / (precision + recall).clamp_min(1.0e-6)
+    return {
+        "auprc": _average_precision_from_tensors(label, prob),
+        "precision@0.5": float(precision.detach().cpu().item()),
+        "recall@0.5": float(recall.detach().cpu().item()),
+        "f1@0.5": float(f1.detach().cpu().item()),
+    }
+
+
+class _WorldModelEvalAccumulator:
+    def __init__(self, *, min_samples, high_cost_threshold, boundary_low, boundary_high, cost_splits=True):
+        self.min_samples = max(int(min_samples), 1)
+        self.high_cost_threshold = float(high_cost_threshold)
+        self.boundary_low = float(boundary_low)
+        self.boundary_high = float(boundary_high)
+        self.cost_splits = bool(cost_splits)
+        self.counts = defaultdict(int)
+        self.values = defaultdict(lambda: defaultdict(list))
+        self.binary = defaultdict(lambda: defaultdict(lambda: {"label": [], "prob": []}))
+
+    def _split_masks(self, source, cost):
+        source = torch.as_tensor(source).detach().reshape(-1).to(torch.int64)
+        cost = torch.as_tensor(cost).detach().float().reshape(-1)
+        masks = {
+            "all": torch.ones_like(source, dtype=torch.bool),
+            "main": source == SOURCE_MAIN,
+            "dual": source == SOURCE_DUAL,
+        }
+        if self.cost_splits:
+            masks["low_cost"] = cost < self.boundary_low
+            masks["boundary_cost"] = (cost >= self.boundary_low) & (cost < self.boundary_high)
+            masks["high_cost"] = cost >= self.high_cost_threshold
+        return masks
+
+    def add_counts(self, source, cost):
+        for split, mask in self._split_masks(source, cost).items():
+            self.counts[split] += int(mask.sum().item())
+
+    def add_scalar(self, metric, source, cost, value):
+        value = torch.as_tensor(value).detach().float().reshape(-1)
+        for split, mask in self._split_masks(source, cost).items():
+            if mask.numel() != value.numel():
+                continue
+            selected = value[mask]
+            if selected.numel() > 0:
+                self.values[split][metric].append(selected.detach().float().cpu())
+
+    def add_binary(self, metric, source, cost, label, prob):
+        label = torch.as_tensor(label).detach().float().reshape(-1)
+        prob = torch.as_tensor(prob).detach().float().reshape(-1)
+        for split, mask in self._split_masks(source, cost).items():
+            if mask.numel() != label.numel() or label.numel() != prob.numel():
+                continue
+            if mask.any():
+                store = self.binary[split][metric]
+                store["label"].append(label[mask].detach().float().cpu())
+                store["prob"].append(prob[mask].detach().float().cpu())
+
+    def summarize(self):
+        metrics = {}
+        split_metric_values = {}
+        for split, count in sorted(self.counts.items()):
+            metrics[f"WMEval/{split}/sample_count"] = float(count)
+            if count < self.min_samples:
+                continue
+            split_values = {}
+            for name, chunks in self.values.get(split, {}).items():
+                if not chunks:
+                    continue
+                value = _mean_or_none(torch.cat(chunks, dim=0))
+                if value is not None:
+                    key = f"WMEval/{split}/{name}"
+                    metrics[key] = value
+                    split_values[name] = value
+            for name, chunks in self.binary.get(split, {}).items():
+                if not chunks["label"] or not chunks["prob"]:
+                    continue
+                binary_metrics = _binary_metrics_from_tensors(
+                    torch.cat(chunks["label"], dim=0),
+                    torch.cat(chunks["prob"], dim=0),
+                )
+                for suffix, value in binary_metrics.items():
+                    if value is not None:
+                        key = f"WMEval/{split}/{name}_{suffix}"
+                        metrics[key] = value
+                        split_values[f"{name}_{suffix}"] = value
+            split_metric_values[split] = split_values
+        gap_specs = (
+            ("prior1_dyn_kl", "prior1/dyn_kl"),
+            ("openloop_h10_cost_mae", "openloop_h10/cost_mae"),
+            ("openloop_h10_force_mae", "openloop_h10/force_mae"),
+            ("openloop_h15_reward_mae", "openloop_h15/reward_mae"),
+        )
+        main_values = split_metric_values.get("main", {})
+        dual_values = split_metric_values.get("dual", {})
+        for gap_name, metric_name in gap_specs:
+            if metric_name in main_values and metric_name in dual_values:
+                metrics[f"WMEvalGap/dual_minus_main/{gap_name}"] = dual_values[metric_name] - main_values[metric_name]
+        return metrics
 
 
 def _sample_training_batches(
@@ -201,6 +382,291 @@ def train_world_model_step(
         pred_cost = metrics.get("cost/pred_mean", metrics.get("cost/predicted_cost_mean"))
         if isinstance(pred_cost, (int, float)):
             logger.log("WorldModel/pred_cost_mean", pred_cost, step)
+    return metrics
+
+
+def _decode_reward(world_model, deter):
+    return world_model.twohot_loss.decode(world_model.reward_head(deter))
+
+
+def _predict_force_from_feat(world_model, feat):
+    if not (getattr(world_model, "force_enabled", False) and getattr(world_model, "force_head", None) is not None):
+        return None, None
+    flat_feat = feat.flatten(0, 1)
+    outputs = world_model.force_head(flat_feat)
+    pred, prob = predict_force_from_outputs(
+        outputs,
+        force_scale=world_model.force_scale,
+        threshold=world_model.force_threshold,
+        signed_force=world_model.force_signed_force,
+    )
+    return pred.reshape(*feat.shape[:-1], 1), prob.reshape(*feat.shape[:-1], 1)
+
+
+def _predict_cost_from_feat(world_model, feat):
+    if not hasattr(world_model, "predict_cost"):
+        zeros = torch.zeros(*feat.shape[:-1], 1, dtype=feat.dtype, device=feat.device)
+        return zeros, zeros
+    pred, extreme_prob, _ = world_model.predict_cost(feat)
+    return pred, extreme_prob
+
+
+def _add_prediction_metrics(
+    acc,
+    prefix,
+    *,
+    source,
+    split_cost,
+    reward_target,
+    reward_pred,
+    cost_target,
+    cost_pred,
+    extreme_target,
+    extreme_prob,
+    done_target,
+    done_logit,
+    force_target=None,
+    force_pred=None,
+):
+    reward_target = torch.as_tensor(reward_target, dtype=reward_pred.dtype, device=reward_pred.device)
+    cost_target = torch.as_tensor(cost_target, dtype=cost_pred.dtype, device=cost_pred.device)
+    done_target = torch.as_tensor(done_target, dtype=done_logit.dtype, device=done_logit.device)
+    extreme_target = torch.as_tensor(extreme_target, dtype=extreme_prob.dtype, device=extreme_prob.device)
+
+    acc.add_scalar(f"{prefix}/reward_mae", source, split_cost, (reward_pred - reward_target).abs())
+    acc.add_scalar(f"{prefix}/reward_bias", source, split_cost, reward_pred - reward_target)
+    acc.add_scalar(f"{prefix}/cost_mae", source, split_cost, (cost_pred - cost_target).abs())
+    acc.add_scalar(f"{prefix}/cost_mse", source, split_cost, (cost_pred - cost_target).pow(2))
+    acc.add_scalar(f"{prefix}/cost_bias", source, split_cost, cost_pred - cost_target)
+    acc.add_binary(f"{prefix}/extreme", source, split_cost, extreme_target, extreme_prob)
+    done_bce = F.binary_cross_entropy_with_logits(done_logit, done_target, reduction="none")
+    acc.add_scalar(f"{prefix}/done_bce", source, split_cost, done_bce)
+
+    if force_target is not None and force_pred is not None:
+        force_target = torch.as_tensor(force_target, dtype=force_pred.dtype, device=force_pred.device)
+        acc.add_scalar(f"{prefix}/force_mae", source, split_cost, (force_pred - force_target).abs())
+        acc.add_scalar(f"{prefix}/force_bias", source, split_cost, force_pred - force_target)
+        acc.add_scalar(f"{prefix}/force_pred_mean", source, split_cost, force_pred)
+        acc.add_scalar(f"{prefix}/force_nonzero_rate", source, split_cost, (force_target.abs() > 1.0e-3).float())
+
+
+@torch.no_grad()
+def run_world_model_eval(
+    *,
+    replay_buffer,
+    world_model,
+    logger,
+    step,
+    cfg,
+    num_envs,
+    high_cost_threshold,
+    boundary_low,
+    boundary_high,
+    use_sample_many=True,
+):
+    if logger is None or not _cfg_bool(cfg, "Enable", False):
+        return {}
+
+    eval_length = max(_cfg_int(cfg, "EvalLength", 48), 2)
+    context_length = max(_cfg_int(cfg, "ContextLength", 16), 1)
+    horizons = _as_positive_int_list(cfg_get(cfg, "Horizons", [1, 3, 5, 10, 15, 30]), [1, 3, 5, 10, 15, 30])
+    max_horizon = max(horizons) if horizons else 1
+    required_length = max(eval_length, context_length + max_horizon + 1)
+    if not replay_buffer.can_sample(required_length):
+        logger.log("WMEval/skipped_can_sample", 1.0, step)
+        return {}
+
+    requested_batch_size = max(_cfg_int(cfg, "BatchSize", 256), int(num_envs))
+    eval_batch_size = max(int(num_envs), ((requested_batch_size + int(num_envs) - 1) // int(num_envs)) * int(num_envs))
+    num_batches = max(_cfg_int(cfg, "NumBatches", 4), 1)
+    min_samples = max(_cfg_int(cfg, "MinSamplesPerSplit", 128), 1)
+    cost_splits = _cfg_bool(cfg, "CostSplits", True)
+
+    was_training = world_model.training
+    world_model.eval()
+    acc = _WorldModelEvalAccumulator(
+        min_samples=min_samples,
+        high_cost_threshold=high_cost_threshold,
+        boundary_low=boundary_low,
+        boundary_high=boundary_high,
+        cost_splits=cost_splits,
+    )
+
+    try:
+        batches = _sample_training_batches(
+            replay_buffer,
+            num_batches,
+            eval_batch_size,
+            required_length,
+            return_dict=True,
+            use_sample_many=use_sample_many,
+        )
+        with torch.autocast(
+            device_type=world_model.device_type,
+            dtype=world_model.tensor_dtype,
+            enabled=world_model.use_amp,
+        ):
+            for batch in batches:
+                obs = batch["obs"].to(world_model.device)
+                action = batch["action"].to(world_model.device)
+                reward = batch["reward"].to(world_model.device)
+                done = batch["done"].to(world_model.device)
+                is_first = batch["is_first"].to(world_model.device)
+                source = batch["source"].to(world_model.device)
+                continuous_cost = batch["continuous_cost"].to(world_model.device)
+                extreme_cost = batch["extreme_cost"].to(world_model.device)
+                force = batch.get("force")
+                if force is not None:
+                    force = force.to(world_model.device)
+
+                obs_model = world_model.preprocess(obs)
+                post, prior, stoch, deter = world_model.dynamic.parallel_observe(
+                    world_model.encoder(obs_model),
+                    action,
+                    is_first,
+                )
+                dyn_kl, _, _, _ = world_model.dynamic.kl_loss(post, prior, world_model.kl_free)
+                del dyn_kl
+
+                feat = torch.cat((deter, stoch), dim=-1)
+                obs_hat = world_model.decoder(stoch)
+                reward_pred = _decode_reward(world_model, deter)
+                done_logit = world_model.done_head(deter)
+                cost_pred, extreme_prob = _predict_cost_from_feat(world_model, feat)
+                force_pred, _ = _predict_force_from_feat(world_model, feat)
+
+                posterior_target = {
+                    "source": source[:, : feat.shape[1]],
+                    "reward": reward[:, : feat.shape[1]],
+                    "done": done[:, : feat.shape[1]],
+                    "cost": continuous_cost[:, : feat.shape[1]],
+                    "extreme": extreme_cost[:, : feat.shape[1]],
+                    "force": force[:, : feat.shape[1]] if force is not None else None,
+                }
+                acc.add_counts(posterior_target["source"], posterior_target["cost"])
+                acc.add_scalar(
+                    "posterior/recon_mse",
+                    posterior_target["source"],
+                    posterior_target["cost"],
+                    (obs_hat - obs_model[:, : obs_hat.shape[1]]).pow(2).mean(dim=-1, keepdim=True),
+                )
+                _add_prediction_metrics(
+                    acc,
+                    "posterior",
+                    source=posterior_target["source"],
+                    split_cost=posterior_target["cost"],
+                    reward_target=posterior_target["reward"],
+                    reward_pred=reward_pred,
+                    cost_target=posterior_target["cost"],
+                    cost_pred=cost_pred,
+                    extreme_target=posterior_target["extreme"],
+                    extreme_prob=extreme_prob,
+                    done_target=posterior_target["done"],
+                    done_logit=done_logit,
+                    force_target=posterior_target["force"],
+                    force_pred=force_pred,
+                )
+
+                prior_stoch = world_model.dynamic.get_flatten_stoch(prior)
+                prior_feat = torch.cat((prior["deter"], prior_stoch), dim=-1)
+                prior_reward = _decode_reward(world_model, prior["deter"])
+                prior_done = world_model.done_head(prior["deter"])
+                prior_cost, prior_extreme = _predict_cost_from_feat(world_model, prior_feat)
+                prior_force, _ = _predict_force_from_feat(world_model, prior_feat)
+                post_dist = world_model.dynamic.get_dist(post)
+                prior_dist = world_model.dynamic.get_dist(prior)
+                prior_dyn_kl = torch.distributions.kl.kl_divergence(post_dist, prior_dist).sum(dim=-1, keepdim=True)
+                prior_len = min(prior_reward.shape[1], max(reward.shape[1] - 1, 0))
+                if prior_len <= 0:
+                    continue
+                prior_target = {
+                    "source": source[:, 1 : 1 + prior_len],
+                    "reward": reward[:, 1 : 1 + prior_len],
+                    "done": done[:, 1 : 1 + prior_len],
+                    "cost": continuous_cost[:, 1 : 1 + prior_len],
+                    "extreme": extreme_cost[:, 1 : 1 + prior_len],
+                    "force": force[:, 1 : 1 + prior_len] if force is not None else None,
+                }
+                prior_reward = prior_reward[:, :prior_len]
+                prior_done = prior_done[:, :prior_len]
+                prior_cost = prior_cost[:, :prior_len]
+                prior_extreme = prior_extreme[:, :prior_len]
+                prior_dyn_kl = prior_dyn_kl[:, :prior_len]
+                if prior_force is not None:
+                    prior_force = prior_force[:, :prior_len]
+                acc.add_scalar("prior1/dyn_kl", prior_target["source"], prior_target["cost"], prior_dyn_kl)
+                _add_prediction_metrics(
+                    acc,
+                    "prior1",
+                    source=prior_target["source"],
+                    split_cost=prior_target["cost"],
+                    reward_target=prior_target["reward"],
+                    reward_pred=prior_reward,
+                    cost_target=prior_target["cost"],
+                    cost_pred=prior_cost,
+                    extreme_target=prior_target["extreme"],
+                    extreme_prob=prior_extreme,
+                    done_target=prior_target["done"],
+                    done_logit=prior_done,
+                    force_target=prior_target["force"],
+                    force_pred=prior_force,
+                )
+
+                ctx = min(context_length, feat.shape[1] - 1)
+                if ctx <= 0:
+                    continue
+                img_state = {key: value[:, ctx - 1].detach() for key, value in post.items()}
+                for horizon in range(1, max_horizon + 1):
+                    action_idx = ctx - 1 + horizon
+                    if action_idx >= action.shape[1]:
+                        break
+                    img_state = world_model.dynamic.img_step(img_state, action[:, action_idx])
+                    if horizon not in horizons:
+                        continue
+                    target_idx = ctx + horizon
+                    if target_idx >= reward.shape[1]:
+                        continue
+                    img_deter = world_model.dynamic.get_deter(img_state)[:, None]
+                    img_stoch = world_model.dynamic.get_flatten_stoch(img_state)[:, None]
+                    img_feat = torch.cat((img_deter, img_stoch), dim=-1)
+                    img_reward = _decode_reward(world_model, img_deter)
+                    img_done = world_model.done_head(img_deter)
+                    img_cost, img_extreme = _predict_cost_from_feat(world_model, img_feat)
+                    img_force, _ = _predict_force_from_feat(world_model, img_feat)
+                    h_source = source[:, target_idx : target_idx + 1]
+                    h_cost = continuous_cost[:, target_idx : target_idx + 1]
+                    h_force = force[:, target_idx : target_idx + 1] if force is not None else None
+                    _add_prediction_metrics(
+                        acc,
+                        f"openloop_h{horizon}",
+                        source=h_source,
+                        split_cost=h_cost,
+                        reward_target=reward[:, target_idx : target_idx + 1],
+                        reward_pred=img_reward,
+                        cost_target=h_cost,
+                        cost_pred=img_cost,
+                        extreme_target=extreme_cost[:, target_idx : target_idx + 1],
+                        extreme_prob=img_extreme,
+                        done_target=done[:, target_idx : target_idx + 1],
+                        done_logit=img_done,
+                        force_target=h_force,
+                        force_pred=img_force,
+                    )
+    finally:
+        if was_training:
+            world_model.train()
+        else:
+            world_model.eval()
+
+    metrics = acc.summarize()
+    metrics["WMEval/eval_batch_size"] = float(eval_batch_size)
+    metrics["WMEval/eval_length"] = float(required_length)
+    metrics["WMEval/context_length"] = float(context_length)
+    metrics["WMEval/num_batches"] = float(num_batches)
+    metrics["WMEval/skipped_can_sample"] = 0.0
+    for key, value in metrics.items():
+        if value is not None:
+            logger.log(key, value, step)
     return metrics
 
 
@@ -801,6 +1267,7 @@ def joint_train_fdpi(
     dual_update_cfg = _node(fdpi_cfg, "DualUpdate")
     dual_sampling_cfg = _node(fdpi_cfg, "DualSampling")
     wm_sampling_cfg = _node(fdpi_cfg, "WorldModelSampling")
+    wm_eval_cfg = _node(fdpi_cfg, "WorldModelEval")
     checkpoint_cfg = _node(fdpi_cfg, "Checkpoint")
     performance_cfg = _node(fdpi_cfg, "Performance")
 
@@ -835,6 +1302,7 @@ def joint_train_fdpi(
     batched_latent_max_batch = max(_cfg_int(performance_cfg, "BatchedLatentEncodeMaxBatch", 1024), 0)
     fdpi_grad_diagnostics_every_steps = _cfg_int(performance_cfg, "FDPIGradDiagnosticsEverySteps", 65536)
     timing_enabled = timing_log_every_steps > 0
+    gp_enabled = _cfg_bool(gp_cfg, "Enable", True)
     step_logger = _EveryNStepLogger(
         logger,
         every_steps=log_every_steps,
@@ -845,7 +1313,9 @@ def joint_train_fdpi(
         replay_buffer.cache_starts = _cfg_bool(performance_cfg, "CacheReplayStarts", True)
     pf = _cfg_float(risk_cfg, "Pf", 0.10)
     cg = _cfg_float(risk_cfg, "Cg", 0.03)
-    feasible_window = FDPIRegimeStatsWindow(_cfg_int(dual_sampling_cfg, "FeasibleRatioWindow", 10000))
+    recent_cost_window_len = _cfg_int(dual_sampling_cfg, "FeasibleRatioWindow", 10000)
+    feasible_window = FDPIRegimeStatsWindow(recent_cost_window_len)
+    recent_cost_window = SourceCostStatsWindow(recent_cost_window_len)
 
     model_update_count = 0
     agent_update_count = 0
@@ -886,6 +1356,12 @@ def joint_train_fdpi(
     train_model_every_iters = max(train_model_every_steps // num_envs, 1)
     train_agent_every_iters = max(train_agent_every_steps // num_envs, 1)
     save_every_iters = max(save_every_steps // num_envs, 1)
+    wm_eval_scheduler = _WorldModelEvalScheduler(
+        enabled=_cfg_bool(wm_eval_cfg, "Enable", False),
+        start_step=_cfg_int(wm_eval_cfg, "StartStep", 1000000),
+        every_steps=_cfg_int(wm_eval_cfg, "EverySteps", 1000000),
+        initial_step=initial_env_steps,
+    )
 
     for iter_idx in tqdm(range(total_iters)):
         env_steps = initial_env_steps + iter_idx * num_envs
@@ -908,7 +1384,7 @@ def joint_train_fdpi(
                 env_action, action, source, state, g_main_for_window = _sample_policy_action(
                     feat=feat,
                     agent=agent,
-                    gp_critic=gp_critic,
+                    gp_critic=gp_critic if gp_enabled else None,
                     dual_policy=dual_policy,
                     world_model=world_model,
                     state=state,
@@ -1005,6 +1481,12 @@ def joint_train_fdpi(
                 pf=pf,
                 cg=cg,
             )
+        recent_cost_window.append(
+            source=source,
+            continuous_cost=continuous_cost,
+            binary_cost=binary_cost,
+            extreme_cost=extreme_cost,
+        )
 
         terminal = torch.as_tensor(
             next_obs_dict.get("is_terminal", torch.zeros_like(done, dtype=torch.int32)),
@@ -1066,6 +1548,9 @@ def joint_train_fdpi(
         episode_len += 1.0
         step_logger.log_lazy("Main/continuous_cost_mean", lambda: continuous_cost.float().mean().item(), env_steps)
         step_logger.log_lazy("Dual/source_count", lambda: float((source == SOURCE_DUAL).sum().item()), env_steps)
+        if step_logger.enabled(env_steps):
+            for key, value in recent_cost_window.stats().items():
+                logger.log(f"RecentCost/{key}", value, env_steps)
         if step_logger.enabled(env_steps) and bool((source == SOURCE_DUAL).any().item()):
             step_logger.log(
                 "Dual/real_cost_mean",
@@ -1155,6 +1640,23 @@ def joint_train_fdpi(
                     timer.stop("world_model_update", token)
                     model_update_count += 1
 
+            if wm_eval_scheduler.should_run(env_steps):
+                token = timer.start()
+                run_world_model_eval(
+                    replay_buffer=replay_buffer,
+                    world_model=world_model,
+                    logger=logger,
+                    step=env_steps,
+                    cfg=wm_eval_cfg,
+                    num_envs=num_envs,
+                    high_cost_threshold=high_cost_threshold,
+                    boundary_low=boundary_low,
+                    boundary_high=boundary_high,
+                    use_sample_many=use_sample_many,
+                )
+                timer.stop("world_model_eval", token)
+                wm_eval_scheduler.mark_ran(env_steps)
+
             gp_batches = []
             gd_batches = []
             dual_batches = []
@@ -1162,7 +1664,7 @@ def joint_train_fdpi(
             detailed_metrics_enabled = detailed_logger.enabled(env_steps)
             policy_metrics_enabled = step_logger.enabled(env_steps)
 
-            if _cfg_bool(gp_cfg, "Enable", True) and should_train_agent_side and replay_buffer.can_sample(batch_length):
+            if gp_enabled and should_train_agent_side and replay_buffer.can_sample(batch_length):
                 token = timer.start()
                 gp_batches = _sample_training_batches(
                     replay_buffer,
@@ -1290,7 +1792,7 @@ def joint_train_fdpi(
                         imagine_samples,
                         world_model,
                         agent,
-                        gp_critic,
+                        gp_critic if gp_enabled else None,
                         imagine_horizon,
                         step_logger if policy_metrics_enabled else None,
                         env_steps,

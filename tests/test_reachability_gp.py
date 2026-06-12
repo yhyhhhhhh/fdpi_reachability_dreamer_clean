@@ -38,6 +38,118 @@ class _FakeDynamic:
         return {"feat": state["feat"]}
 
 
+class _FakeEvalDynamic:
+    def __init__(self, feat_dim=3):
+        self.feat_dim = int(feat_dim)
+
+    def parallel_observe(self, embed, action, is_first):
+        del is_first
+        horizon = action.shape[1]
+        deter = embed[:, :horizon, : self.feat_dim] * 0.5
+        stoch = embed[:, :horizon, : self.feat_dim]
+        logits = torch.zeros(*deter.shape[:2], 1, 2, dtype=deter.dtype, device=deter.device)
+        post = {"deter": deter, "stoch": stoch[..., None], "logit": logits}
+        prior = {"deter": deter * 0.9, "stoch": stoch[..., None] * 0.9, "logit": logits.clone()}
+        return post, prior, stoch, deter
+
+    def kl_loss(self, post, prior, free):
+        del prior, free
+        zero = post["deter"].new_tensor(0.0)
+        return zero, zero, zero, zero
+
+    def get_feat(self, state):
+        return torch.cat((state["deter"], state["stoch"].flatten(-2, -1)), dim=-1)
+
+    def get_flatten_stoch(self, state):
+        return state["stoch"].flatten(-2, -1)
+
+    def get_deter(self, state):
+        return state["deter"]
+
+    def get_dist(self, state):
+        return torch.distributions.OneHotCategorical(logits=state["logit"])
+
+    def img_step(self, state, action):
+        del action
+        batch = state["deter"].shape[0]
+        return {
+            "deter": state["deter"] + 0.01,
+            "stoch": state["stoch"],
+            "logit": torch.zeros(batch, 1, 2, dtype=state["deter"].dtype, device=state["deter"].device),
+        }
+
+
+class _FakeTwoHotLoss:
+    def decode(self, value):
+        return value[..., :1]
+
+
+class _FakeEvalWorldModel(nn.Module):
+    def __init__(self, feat_dim=3, obs_dim=3):
+        super().__init__()
+        self.device = "cpu"
+        self.device_type = "cpu"
+        self.tensor_dtype = torch.float32
+        self.use_amp = False
+        self.kl_free = 1.0
+        self.force_enabled = False
+        self.dynamic = _FakeEvalDynamic(feat_dim=feat_dim)
+        self.encoder = nn.Identity()
+        self.decoder = nn.Linear(feat_dim, obs_dim)
+        self.reward_head = nn.Linear(feat_dim, 1)
+        self.done_head = nn.Linear(feat_dim, 1)
+        self.twohot_loss = _FakeTwoHotLoss()
+
+    def preprocess(self, obs):
+        return obs
+
+    def predict_cost(self, feat):
+        pred = torch.sigmoid(feat[..., :1])
+        return pred, pred, pred
+
+
+class _FakeEvalReplay:
+    def __init__(self, num_envs=2):
+        self.num_envs = int(num_envs)
+
+    def ready(self):
+        return True
+
+    def can_sample(self, horizon):
+        return horizon >= 1
+
+    def sample_many(self, num_batches, batch_size, horizon, **kwargs):
+        del kwargs
+        batches = []
+        for _ in range(int(num_batches)):
+            source = torch.zeros(batch_size, horizon, 1, dtype=torch.long)
+            source[batch_size // 2 :] = 1
+            batches.append(
+                {
+                    "obs": torch.randn(batch_size, horizon, 3),
+                    "action": torch.zeros(batch_size, horizon, 2),
+                    "reward": torch.randn(batch_size, horizon, 1),
+                    "done": torch.zeros(batch_size, horizon, 1),
+                    "is_first": torch.zeros(batch_size, horizon, 1),
+                    "continuous_cost": torch.rand(batch_size, horizon, 1),
+                    "binary_cost": torch.zeros(batch_size, horizon, 1),
+                    "extreme_cost": torch.randint(0, 2, (batch_size, horizon, 1)).float(),
+                    "bottom_force": torch.zeros(batch_size, horizon, 1),
+                    "force_excess": torch.zeros(batch_size, horizon, 1),
+                    "source": source,
+                }
+            )
+        return batches
+
+
+class _ListLogger:
+    def __init__(self):
+        self.items = []
+
+    def log(self, tag, value, step):
+        self.items.append((tag, value, step))
+
+
 class _FakeWorldModel(nn.Module):
     def __init__(self, feat_dim=4, action_dim=2):
         super().__init__()
@@ -292,6 +404,101 @@ class ReachabilityGpTests(unittest.TestCase):
         self.assertTrue(torch.equal(feat, posterior_features(world_model, obs, action, is_first)))
         self.assertTrue(torch.equal(state["feat"], posterior_states(world_model, obs, action, is_first)["feat"]))
 
+    def test_isaaclab22_world_model_eval_binary_metrics_handle_edge_cases(self):
+        from fdpi_reachability_dreamer_isaaclab22.trainer import (
+            _average_precision_from_tensors,
+            _binary_metrics_from_tensors,
+        )
+
+        self.assertIsNone(_average_precision_from_tensors(torch.zeros(3), torch.rand(3)))
+        self.assertAlmostEqual(_average_precision_from_tensors(torch.ones(3), torch.tensor([0.2, 0.1, 0.9])), 1.0)
+        self.assertAlmostEqual(
+            _average_precision_from_tensors(torch.tensor([1.0, 0.0, 1.0]), torch.tensor([0.9, 0.8, 0.1])),
+            5.0 / 6.0,
+            places=6,
+        )
+        metrics = _binary_metrics_from_tensors(torch.tensor([1.0, 0.0, 1.0]), torch.tensor([0.9, 0.8, 0.1]))
+        self.assertIn("precision@0.5", metrics)
+        self.assertIn("recall@0.5", metrics)
+        self.assertIn("f1@0.5", metrics)
+
+    def test_isaaclab22_world_model_eval_scheduler_crosses_threshold_once(self):
+        from fdpi_reachability_dreamer_isaaclab22.trainer import _WorldModelEvalScheduler
+
+        scheduler = _WorldModelEvalScheduler(enabled=True, start_step=1_000_000, every_steps=1_000_000)
+        self.assertFalse(scheduler.should_run(999_936))
+        self.assertTrue(scheduler.should_run(1_000_064))
+        scheduler.mark_ran(1_000_064)
+        self.assertFalse(scheduler.should_run(1_000_128))
+        self.assertTrue(scheduler.should_run(2_000_000))
+
+    def test_isaaclab22_world_model_eval_accumulator_splits_main_dual(self):
+        from fdpi_reachability_dreamer_isaaclab22.cost_utils import SOURCE_DUAL, SOURCE_MAIN
+        from fdpi_reachability_dreamer_isaaclab22.trainer import _WorldModelEvalAccumulator
+
+        acc = _WorldModelEvalAccumulator(
+            min_samples=1,
+            high_cost_threshold=0.5,
+            boundary_low=0.1,
+            boundary_high=0.4,
+            cost_splits=True,
+        )
+        source = torch.tensor([SOURCE_MAIN, SOURCE_MAIN, SOURCE_DUAL, SOURCE_DUAL])
+        cost = torch.tensor([0.0, 0.2, 0.6, 0.8])
+        acc.add_counts(source, cost)
+        acc.add_scalar("posterior/cost_mae", source, cost, torch.tensor([0.1, 0.2, 0.3, 0.5]))
+        acc.add_binary("posterior/extreme", source, cost, torch.tensor([0.0, 0.0, 1.0, 1.0]), torch.tensor([0.1, 0.2, 0.8, 0.9]))
+        metrics = acc.summarize()
+
+        self.assertEqual(metrics["WMEval/main/sample_count"], 2.0)
+        self.assertEqual(metrics["WMEval/dual/sample_count"], 2.0)
+        self.assertAlmostEqual(metrics["WMEval/main/posterior/cost_mae"], 0.15, places=6)
+        self.assertAlmostEqual(metrics["WMEval/dual/posterior/cost_mae"], 0.4, places=6)
+        self.assertAlmostEqual(metrics["WMEval/dual/posterior/extreme_auprc"], 1.0, places=6)
+
+    def test_isaaclab22_run_world_model_eval_logs_main_dual_openloop(self):
+        from fdpi_reachability_dreamer_isaaclab22.trainer import run_world_model_eval
+
+        logger = _ListLogger()
+        metrics = run_world_model_eval(
+            replay_buffer=_FakeEvalReplay(num_envs=2),
+            world_model=_FakeEvalWorldModel(feat_dim=3, obs_dim=3),
+            logger=logger,
+            step=123,
+            cfg={
+                "Enable": True,
+                "EvalLength": 8,
+                "ContextLength": 3,
+                "Horizons": [1, 2],
+                "NumBatches": 1,
+                "BatchSize": 2,
+                "MinSamplesPerSplit": 1,
+                "CostSplits": True,
+            },
+            num_envs=2,
+            high_cost_threshold=0.5,
+            boundary_low=0.1,
+            boundary_high=0.4,
+        )
+
+        self.assertIn("WMEval/main/sample_count", metrics)
+        self.assertIn("WMEval/dual/sample_count", metrics)
+        self.assertTrue(any(key.startswith("WMEval/main/posterior") for key in metrics))
+        self.assertTrue(any(key.startswith("WMEval/dual/openloop_h2") for key in metrics))
+        self.assertTrue(logger.items)
+
+    def test_isaaclab22_load_config_sets_world_model_eval_defaults_and_override(self):
+        from fdpi_reachability_dreamer_isaaclab22.train import load_config
+
+        base = load_config("configs/reachability_gp_isaaclab22.yaml")
+        self.assertFalse(base.FDPIRegimeDreamer.WorldModelEval.Enable)
+        self.assertEqual(base.FDPIRegimeDreamer.WorldModelEval.EverySteps, 1_000_000)
+        self.assertEqual(list(base.FDPIRegimeDreamer.WorldModelEval.Horizons), [1, 3, 5, 10, 15, 30])
+
+        kl003 = load_config("configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl003_128env.yaml")
+        self.assertTrue(kl003.FDPIRegimeDreamer.WorldModelEval.Enable)
+        self.assertEqual(kl003.FDPIRegimeDreamer.WorldModelEval.EverySteps, 1_000_000)
+
     def test_isaaclab22_gp_update_accepts_precomputed_posterior_feat(self):
         from fdpi_reachability_dreamer_isaaclab22.cost_utils import posterior_features
         from fdpi_reachability_dreamer_isaaclab22.risk_critics import GpReachabilityCritic as IsaacGpCritic
@@ -375,6 +582,33 @@ class ReachabilityGpTests(unittest.TestCase):
         self.assertIn("mean_l2_to_main", info)
         self.assertIn("sample_l2_to_main_mean", info)
         self.assertIn("logprob_gap", info)
+
+    def test_isaaclab22_source_cost_window_tracks_recent_source_costs(self):
+        from fdpi_reachability_dreamer_isaaclab22.cost_utils import SOURCE_DUAL, SOURCE_MAIN
+        from fdpi_reachability_dreamer_isaaclab22.sampling import SourceCostStatsWindow
+
+        window = SourceCostStatsWindow(maxlen=4)
+        window.append(
+            source=torch.tensor([[SOURCE_MAIN], [SOURCE_DUAL], [SOURCE_MAIN]]),
+            continuous_cost=torch.tensor([[0.0], [0.5], [1.0]]),
+            binary_cost=torch.tensor([[0.0], [1.0], [1.0]]),
+            extreme_cost=torch.tensor([[0.0], [0.0], [1.0]]),
+        )
+        window.append(
+            source=torch.tensor([[SOURCE_DUAL], [SOURCE_DUAL]]),
+            continuous_cost=torch.tensor([[0.0], [1.0]]),
+            binary_cost=torch.tensor([[0.0], [1.0]]),
+            extreme_cost=torch.tensor([[0.0], [1.0]]),
+        )
+
+        stats = window.stats()
+        self.assertEqual(stats["window_count"], 2.0)
+        self.assertEqual(stats["main_count"], 0.0)
+        self.assertEqual(stats["dual_count"], 2.0)
+        self.assertEqual(stats["main_binary_cost_rate"], 0.0)
+        self.assertAlmostEqual(stats["dual_binary_cost_rate"], 0.5)
+        self.assertAlmostEqual(stats["dual_continuous_cost_mean"], 0.5)
+        self.assertAlmostEqual(stats["dual_extreme_cost_rate"], 0.5)
 
 
 if __name__ == "__main__":
