@@ -160,6 +160,7 @@ class FDPIRegimeActorCriticAgent(CostAwareActorCriticAgent):
         logger=None,
         step=None,
         compute_grad_diagnostics=True,
+        return_metrics=True,
     ):
         self.train()
         self.slow_critic.eval()
@@ -237,7 +238,7 @@ class FDPIRegimeActorCriticAgent(CostAwareActorCriticAgent):
             total_loss = critic_loss + fdpi_actor_loss
 
         grad_diagnostics = {}
-        if compute_grad_diagnostics:
+        if compute_grad_diagnostics and return_metrics:
             actor_params = list(self.actor.parameters())
             reward_grad_norm = _grad_norm_from_loss(metrics["reward_loss_tensor"], actor_params)
             risk_grad_norm = _grad_norm_from_loss(metrics["risk_loss_tensor"], actor_params)
@@ -272,12 +273,15 @@ class FDPIRegimeActorCriticAgent(CostAwareActorCriticAgent):
         self.scaler.scale(total_loss).backward()
         self.scaler.unscale_(self.optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=100.0)
-        grad_norm_value = float(torch.as_tensor(grad_norm).detach().float().item())
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.optimizer.zero_grad(set_to_none=True)
         self.update_slow_critic()
 
+        if not return_metrics and logger is None:
+            return {}
+
+        grad_norm_value = float(torch.as_tensor(grad_norm).detach().float().item())
         if logger is not None:
             logger.log("MainFDPI/enabled", 1.0, step)
             logger.log("ActorCritic/critic_loss", critic_loss.detach().float().item(), step)

@@ -112,6 +112,12 @@ class _EveryNStepLogger:
         if self.enabled(step) or str(tag).startswith(self.always_prefixes):
             self.logger.log(tag, value, step)
 
+    def log_lazy(self, tag, value_fn, step):
+        if self.logger is None:
+            return
+        if self.enabled(step) or str(tag).startswith(self.always_prefixes):
+            self.logger.log(tag, value_fn(), step)
+
     def log_video(self, tag, value, step):
         if self.logger is not None and self.enabled(step):
             self.logger.log_video(tag, value, step)
@@ -155,7 +161,16 @@ def _sample_training_batches(
     ]
 
 
-def train_world_model_step(batch, world_model, agent, logger, step, *, compute_detailed_metrics=True):
+def train_world_model_step(
+    batch,
+    world_model,
+    agent,
+    logger,
+    step,
+    *,
+    compute_detailed_metrics=True,
+    return_metrics=True,
+):
     if agent is not None:
         agent.eval()
     metrics = world_model.update(
@@ -172,6 +187,7 @@ def train_world_model_step(batch, world_model, agent, logger, step, *, compute_d
         logger=logger,
         step=step,
         compute_detailed_metrics=compute_detailed_metrics,
+        return_metrics=return_metrics,
     )
     if logger is not None and isinstance(metrics, dict):
         if "dyn_loss" in metrics:
@@ -256,6 +272,7 @@ def train_agent_step(
     *,
         fdpi_cfg=None,
         compute_fdpi_grad_diagnostics=True,
+        return_metrics=True,
 ):
     world_model.eval()
     feat, action, discount, reward, weight = world_model.imagine_data(
@@ -282,12 +299,15 @@ def train_agent_step(
             logger=logger,
             step=step,
             compute_grad_diagnostics=compute_fdpi_grad_diagnostics,
+            return_metrics=return_metrics,
         )
         info["used_fdpi_regime"] = True
         return info
-    agent.update(feat, action, discount, reward, weight, logger, step)
+    agent.update(feat, action, discount, reward, weight, logger if return_metrics else None, step)
     if logger is not None:
         logger.log("MainFDPI/enabled", 0.0, step)
+    if not return_metrics:
+        return {}
     return {
         "used_fdpi_regime": False,
         "task_reward_mean": float(reward.detach().float().mean().item()),
@@ -818,7 +838,7 @@ def joint_train_fdpi(
     step_logger = _EveryNStepLogger(
         logger,
         every_steps=log_every_steps,
-        always_prefixes=("Rollout/IsaacLab/", "Train/", "Timing/"),
+        always_prefixes=("Rollout/IsaacLab/",),
     )
     detailed_logger = _EveryNStepLogger(logger, every_steps=detailed_log_every_steps)
     if hasattr(replay_buffer, "cache_starts"):
@@ -1044,10 +1064,14 @@ def joint_train_fdpi(
         episode_bottom_force += bottom_force.view(-1)
         episode_bottom_force_peak = torch.maximum(episode_bottom_force_peak, bottom_force.view(-1))
         episode_len += 1.0
-        step_logger.log("Main/continuous_cost_mean", continuous_cost.float().mean().item(), env_steps)
-        step_logger.log("Dual/source_count", float((source == SOURCE_DUAL).sum().item()), env_steps)
-        if (source == SOURCE_DUAL).any():
-            step_logger.log("Dual/real_cost_mean", continuous_cost[source.view(-1) == SOURCE_DUAL].float().mean().item(), env_steps)
+        step_logger.log_lazy("Main/continuous_cost_mean", lambda: continuous_cost.float().mean().item(), env_steps)
+        step_logger.log_lazy("Dual/source_count", lambda: float((source == SOURCE_DUAL).sum().item()), env_steps)
+        if step_logger.enabled(env_steps) and bool((source == SOURCE_DUAL).any().item()):
+            step_logger.log(
+                "Dual/real_cost_mean",
+                continuous_cost[source.view(-1) == SOURCE_DUAL].float().mean().item(),
+                env_steps,
+            )
 
         if done.any():
             token = timer.start()
@@ -1092,6 +1116,7 @@ def joint_train_fdpi(
 
         if replay_buffer.ready():
             if iter_idx % train_model_every_iters == 0 and replay_buffer.can_sample(batch_length):
+                detailed_metrics_enabled = detailed_logger.enabled(env_steps)
                 token = timer.start()
                 batches = _sample_training_batches(
                     replay_buffer,
@@ -1107,7 +1132,7 @@ def joint_train_fdpi(
                 )
                 timer.stop("sample_world_model_batch", token)
                 for batch in batches:
-                    if detailed_logger.enabled(env_steps):
+                    if detailed_metrics_enabled:
                         _log_batch_composition(
                             logger,
                             "WorldModelBatch",
@@ -1122,9 +1147,10 @@ def joint_train_fdpi(
                         batch,
                         world_model,
                         agent,
-                        detailed_logger,
+                        detailed_logger if detailed_metrics_enabled else None,
                         env_steps,
-                        compute_detailed_metrics=detailed_logger.enabled(env_steps),
+                        compute_detailed_metrics=detailed_metrics_enabled,
+                        return_metrics=detailed_metrics_enabled,
                     )
                     timer.stop("world_model_update", token)
                     model_update_count += 1
@@ -1133,6 +1159,8 @@ def joint_train_fdpi(
             gd_batches = []
             dual_batches = []
             should_train_agent_side = iter_idx % train_agent_every_iters == 0
+            detailed_metrics_enabled = detailed_logger.enabled(env_steps)
+            policy_metrics_enabled = step_logger.enabled(env_steps)
 
             if _cfg_bool(gp_cfg, "Enable", True) and should_train_agent_side and replay_buffer.can_sample(batch_length):
                 token = timer.start()
@@ -1204,9 +1232,10 @@ def joint_train_fdpi(
                     world_model,
                     agent,
                     dual_policy,
-                    logger=detailed_logger,
+                    logger=detailed_logger if detailed_metrics_enabled else None,
                     step=env_steps,
                     posterior_feat=batch.get("_posterior_feat") if use_batched_critic_latent else None,
+                    return_metrics=detailed_metrics_enabled,
                 )
                 timer.stop("gp_update", token)
                 gp_update_count += 1
@@ -1217,9 +1246,10 @@ def joint_train_fdpi(
                     batch,
                     world_model,
                     dual_policy,
-                    logger=detailed_logger,
+                    logger=detailed_logger if detailed_metrics_enabled else None,
                     step=env_steps,
                     posterior_feat=batch.get("_posterior_feat") if use_batched_critic_latent else None,
+                    return_metrics=detailed_metrics_enabled,
                 )
                 timer.stop("gd_update", token)
                 gd_update_count += 1
@@ -1234,9 +1264,10 @@ def joint_train_fdpi(
                     dual_policy,
                     dual_update_cfg,
                     cost_cfg=cost_cfg,
-                    logger=detailed_logger,
+                    logger=step_logger if policy_metrics_enabled else None,
                     step=env_steps,
                     posterior_state=batch.get("_posterior_state") if use_batched_critic_latent else None,
+                    return_metrics=policy_metrics_enabled,
                 )
                 timer.stop("dual_update", token)
                 last_dual_kl = abs(float(info_dual.get("kl_to_main", 0.0))) if info_dual else last_dual_kl
@@ -1261,28 +1292,29 @@ def joint_train_fdpi(
                         agent,
                         gp_critic,
                         imagine_horizon,
-                        detailed_logger,
+                        step_logger if policy_metrics_enabled else None,
                         env_steps,
                         fdpi_cfg=fdpi_cfg,
                         compute_fdpi_grad_diagnostics=(
                             fdpi_grad_diagnostics_every_steps > 0
                             and env_steps % fdpi_grad_diagnostics_every_steps == 0
-                            and detailed_logger.enabled(env_steps)
+                            and detailed_metrics_enabled
                         ),
+                        return_metrics=policy_metrics_enabled,
                     )
                     timer.stop("agent_update", token)
                     agent_update_count += 1
 
             token = timer.start()
             collected_steps = env_steps + num_envs
-            logger.log("Train/model_updates", model_update_count, env_steps)
-            logger.log("Train/agent_updates", agent_update_count, env_steps)
-            logger.log("Train/gp_updates", gp_update_count, env_steps)
-            logger.log("Train/gd_updates", gd_update_count, env_steps)
-            logger.log("Train/dual_updates", dual_update_count, env_steps)
-            logger.log("Train/model_update_ratio", model_update_count / collected_steps, env_steps)
-            logger.log("Train/agent_update_ratio", agent_update_count / collected_steps, env_steps)
-            if detailed_logger.enabled(env_steps):
+            step_logger.log("Train/model_updates", model_update_count, env_steps)
+            step_logger.log("Train/agent_updates", agent_update_count, env_steps)
+            step_logger.log("Train/gp_updates", gp_update_count, env_steps)
+            step_logger.log("Train/gd_updates", gd_update_count, env_steps)
+            step_logger.log("Train/dual_updates", dual_update_count, env_steps)
+            step_logger.log("Train/model_update_ratio", model_update_count / collected_steps, env_steps)
+            step_logger.log("Train/agent_update_ratio", agent_update_count / collected_steps, env_steps)
+            if detailed_metrics_enabled:
                 _log_replay_stats(
                     replay_buffer,
                     logger,

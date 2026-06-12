@@ -335,6 +335,7 @@ class ContinuousCostWorldModel(ParallelWorldModel):
         logger=None,
         step=None,
         compute_detailed_metrics=True,
+        return_metrics=True,
     ):
         self.train()
         with torch.autocast(device_type=self.device_type, dtype=self.tensor_dtype, enabled=self.use_amp):
@@ -404,6 +405,9 @@ class ContinuousCostWorldModel(ParallelWorldModel):
             else:
                 self.optimizer.step()
         self.optimizer.zero_grad(set_to_none=True)
+
+        if not return_metrics and logger is None:
+            return {}
 
         metrics = {
             "wm_loss": float(total_loss.detach().float().item()),

@@ -1,0 +1,46 @@
+实验:
+  名称: "128环境低KL对偶探索长训"
+  日期: "2026-06-12"
+  目的: "在保留 baseline 更新密度的前提下，将并行环境数提高到 128，以更充分利用 RTX 4090，并继续验证低 KL 对偶探索。"
+  输出目录: "experiments/2026-06-12_128环境低KL对偶探索长训"
+
+运行:
+  tmux_session: "dual_kl01_128env_long"
+  seed: 0
+  device: "cuda:0"
+  env_name: "SurgicalRobot5-HeadPipe-GraspGoalDreamerForce-OSC-RL-Direct-v1"
+  num_envs: 128
+
+训练:
+  total_env_steps: 10000000
+  buffer_warmup_env_steps: 51200
+  batch_size: 128
+  batch_length: 64
+  imagine_batch_size: 128
+  imagine_context: 16
+  imagine_horizon: 15
+  train_model_every_steps: 256
+  train_agent_every_steps: 256
+  model_update: 4
+  agent_update: 4
+  gp_update_steps: 2
+  gd_start_step: 1000000
+  gd_update_steps: 2
+  dual_sampling_start_step: 1000000
+  dual_update_start_step: 1000000
+  dual_update_steps: 2
+  dual_kl_coeff: 0.1
+
+工程优化:
+  amp: true
+  tf32: true
+  replay_start_cache: true
+  sample_many: true
+  batched_critic_latent_encoding: true
+  log_every_steps: 8192
+
+日志:
+  wandb_mode: "online"
+  run_name: "fdpi-baseline-engineering-dual-kl01-128env"
+  checkpoint_dir: "experiments/2026-06-12_128环境低KL对偶探索长训/检查点"
+  log_dir: "experiments/2026-06-12_128环境低KL对偶探索长训/日志"

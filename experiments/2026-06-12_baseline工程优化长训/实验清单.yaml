@@ -1,6 +1,6 @@
 date: "2026-06-12"
 name: "baseline工程优化长训"
-status: "运行中"
+status: "已停止"
 objective: "保持 baseline 更新密度和 batch/env 参数，只启用工程优化，验证旧 baseline 夹取学习能力是否恢复。"
 command: "bash experiments/2026-06-12_baseline工程优化长训/运行命令.sh"
 tmux_command: "bash experiments/2026-06-12_baseline工程优化长训/启动tmux长训.sh"
@@ -25,3 +25,5 @@ tmux:
   log: "experiments/2026-06-12_baseline工程优化长训/日志/tmux训练_baseline_engineering_20260612_012750.log"
   checkpoint_dir: "experiments/2026-06-12_baseline工程优化长训/检查点/fdpi-baseline-engineering/baseline_engineering_20260612_012750"
   wandb_run: "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/yygyodz1"
+  stopped_at: "2026-06-12 11:16:19 CST"
+  exit_status: 0

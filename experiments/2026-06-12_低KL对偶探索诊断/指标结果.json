@@ -1,5 +1,7 @@
 {
-  "status": "pending",
-  "wandb_run": null,
-  "summary": "实验尚未运行。"
+  "status": "stopped",
+  "wandb_run": "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/zkepnar4",
+  "run_id": "dual_kl01_20260612_111837",
+  "tmux_session": "dual_kl01_long",
+  "summary": "64 env 版本已于 2026-06-12 11:54:32 CST 正常停止，后续切换到 128 env 长训。"
 }

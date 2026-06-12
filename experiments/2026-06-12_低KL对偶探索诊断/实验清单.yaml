@@ -1,6 +1,6 @@
 date: "2026-06-12"
 name: "低KL对偶探索诊断"
-status: "已准备"
+status: "已停止"
 objective: "将 DualUpdate.KLCoeff 从 1.0 降到 0.1，并新增 dual-main 动作距离日志，验证对偶策略是否能采到比主策略更危险的数据。"
 command: "bash experiments/2026-06-12_低KL对偶探索诊断/运行命令.sh"
 tmux_command: "bash experiments/2026-06-12_低KL对偶探索诊断/启动tmux长训.sh"
@@ -22,3 +22,13 @@ directories:
   checkpoints: "experiments/2026-06-12_低KL对偶探索诊断/检查点"
   images: "experiments/2026-06-12_低KL对偶探索诊断/图片"
   config_snapshots: "experiments/2026-06-12_低KL对偶探索诊断/配置快照"
+tmux:
+  session: "dual_kl01_long"
+  started_at: "2026-06-12 11:18:37 CST"
+  run_id: "dual_kl01_20260612_111837"
+  log: "experiments/2026-06-12_低KL对偶探索诊断/日志/tmux训练_dual_kl01_20260612_111837.log"
+  checkpoint_dir: "experiments/2026-06-12_低KL对偶探索诊断/检查点/fdpi-baseline-engineering-dual-kl01/dual_kl01_20260612_111837"
+  wandb_run: "https://wandb.ai/2332133796-yhyper/IsaacLab22-SurgicalRobot5-FDPI-Reachability/runs/zkepnar4"
+  stopped_at: "2026-06-12 11:54:32 CST"
+  exit_status: 0
+  stopped_reason: "切换到 128 env 高 GPU 利用率版本。"

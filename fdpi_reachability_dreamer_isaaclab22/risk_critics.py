@@ -341,6 +341,7 @@ class _DoubleRiskCritic(nn.Module):
         main_policy=None,
         dual_policy=None,
         posterior_feat=None,
+        return_metrics=True,
     ):
         self.train()
         world_model.eval()
@@ -377,10 +378,12 @@ class _DoubleRiskCritic(nn.Module):
         else:
             grad_norms = [param.grad.detach().float().norm(2) for param in critic_params if param.grad is not None]
             grad_norm = torch.linalg.vector_norm(torch.stack(grad_norms)) if grad_norms else loss.new_tensor(0.0)
-        grad_norm_value = float(torch.as_tensor(grad_norm).detach().float().item())
         with torch.no_grad():
             self.optimizer.step()
         self.soft_update_targets()
+
+        if not return_metrics and logger is None:
+            return {}
 
         with torch.no_grad():
             risk = self.policy_reduce(pred1, pred2).clamp(0.0, self.risk_max)
@@ -400,6 +403,7 @@ class _DoubleRiskCritic(nn.Module):
             if dual_policy is not None:
                 dual_action = dual_policy.sample(z)
                 dual_action_mean = self.risk(z, dual_action).mean()
+        grad_norm_value = float(torch.as_tensor(grad_norm).detach().float().item())
         info = {
             "loss": float(loss.detach().float().item()),
             "mean": float(risk.detach().float().mean().item()),
@@ -445,7 +449,18 @@ class GpReachabilityCritic(_DoubleRiskCritic):
         self.target_gp1 = self.target_critic1
         self.target_gp2 = self.target_critic2
 
-    def update(self, batch, world_model, main_policy, dual_policy=None, *, logger=None, step=None, posterior_feat=None):
+    def update(
+        self,
+        batch,
+        world_model,
+        main_policy,
+        dual_policy=None,
+        *,
+        logger=None,
+        step=None,
+        posterior_feat=None,
+        return_metrics=True,
+    ):
         if self.target_type == TARGET_N_STEP_REACHABILITY:
             return self._update_n_step_reachability(
                 batch,
@@ -455,6 +470,7 @@ class GpReachabilityCritic(_DoubleRiskCritic):
                 logger=logger,
                 step=step,
                 posterior_feat=posterior_feat,
+                return_metrics=return_metrics,
             )
         if self.target_type != TARGET_TD_BINARY:
             raise ValueError(f"Unsupported Gp TargetType: {self.target_type}")
@@ -467,6 +483,7 @@ class GpReachabilityCritic(_DoubleRiskCritic):
             main_policy=main_policy,
             dual_policy=dual_policy,
             posterior_feat=posterior_feat,
+            return_metrics=return_metrics,
         )
 
     def _update_n_step_reachability(
@@ -479,6 +496,7 @@ class GpReachabilityCritic(_DoubleRiskCritic):
         logger=None,
         step=None,
         posterior_feat=None,
+        return_metrics=True,
     ):
         self.train()
         world_model.eval()
@@ -525,10 +543,12 @@ class GpReachabilityCritic(_DoubleRiskCritic):
         else:
             grad_norms = [param.grad.detach().float().norm(2) for param in critic_params if param.grad is not None]
             grad_norm = torch.linalg.vector_norm(torch.stack(grad_norms)) if grad_norms else loss.new_tensor(0.0)
-        grad_norm_value = float(torch.as_tensor(grad_norm).detach().float().item())
         with torch.no_grad():
             self.optimizer.step()
         self.soft_update_targets()
+
+        if not return_metrics and logger is None:
+            return {}
 
         with torch.no_grad():
             risk = self.policy_reduce(pred1, pred2).clamp(0.0, self.risk_max)
@@ -550,6 +570,7 @@ class GpReachabilityCritic(_DoubleRiskCritic):
             weight_sum = weight.sum().clamp_min(1.0e-6)
             reachability_positive_weighted_mass = weight[reach_mask].sum() / weight_sum
             cost_t_weighted_mass = weight[high_mask].sum() / weight_sum
+        grad_norm_value = float(torch.as_tensor(grad_norm).detach().float().item())
         info = {
             "loss": float(loss.detach().float().item()),
             "mean": float(risk.detach().float().mean().item()),
@@ -599,7 +620,17 @@ class GdRiskCritic(_DoubleRiskCritic):
         self.target_gd1 = self.target_critic1
         self.target_gd2 = self.target_critic2
 
-    def update(self, batch, world_model, dual_policy, *, logger=None, step=None, posterior_feat=None):
+    def update(
+        self,
+        batch,
+        world_model,
+        dual_policy,
+        *,
+        logger=None,
+        step=None,
+        posterior_feat=None,
+        return_metrics=True,
+    ):
         return self._update_impl(
             batch,
             world_model,
@@ -608,4 +639,5 @@ class GdRiskCritic(_DoubleRiskCritic):
             step=step,
             dual_policy=dual_policy,
             posterior_feat=posterior_feat,
+            return_metrics=return_metrics,
         )

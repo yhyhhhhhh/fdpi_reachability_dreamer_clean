@@ -2,6 +2,101 @@
 
 ## 2026-06-12
 
+### LOGIC_CHANGE：降低正式训练中的非关键指标同步开销
+
+修改内容：
+- 为 world model、Gp/Gd critic、主策略 FDPI update、dual update 增加 `return_metrics` 开关。
+- 在非日志步不再构造大量 Python float 指标，避免每个 update 内部反复 `.item()` 触发 GPU 同步。
+- 主训练循环仅在 `LogEverySteps` 记录主策略/对偶策略关键优化指标，在 `DetailedLogEverySteps` 才记录 world model、Gp/Gd、batch composition、replay stats 等细项。
+- `Train/*` 更新计数和 ratio 改为走低频 `step_logger`，减少 W&B 高频 flush。
+- 对偶更新在非日志步仍保留最小 `kl_to_main` 返回值，保证 dual sampling ratio 控制逻辑不变。
+
+修改原因：
+- 当前瓶颈主要在 warmup 后更新部分，且用户主要关注主策略与对偶策略优化情况，不需要每个 update 都记录世界模型和 critic 的大量细粒度指标。
+- `.item()` 会造成 GPU/CPU 同步；减少非关键指标同步可以提升正式长训吞吐，同时尽量不改变算法更新比例。
+
+影响：
+- 算法 loss、采样比例、更新步数和 replay 内容不变。
+- W&B 中 world model、Gp/Gd、replay 细项变为低频记录；主策略与对偶策略的核心指标仍按 `LogEverySteps` 保留。
+- 已在运行中的训练不会自动应用该代码，需要重启新 run 才生效。
+
+验证方式：
+- 已通过：`python -m py_compile fdpi_reachability_dreamer_isaaclab22/trainer.py fdpi_reachability_dreamer_isaaclab22/world_model.py fdpi_reachability_dreamer_isaaclab22/risk_critics.py fdpi_reachability_dreamer_isaaclab22/agent.py fdpi_reachability_dreamer_isaaclab22/dual_update.py`。
+- 已通过：`python -m unittest tests.test_reachability_gp`。
+
+相关实验：
+- 后续重启 `experiments/2026-06-12_128环境低KL对偶探索长训/` 或低 KL 对偶探索长训后生效。
+
+---
+
+### CONFIG_CHANGE：正式 baseline engineering 配置关闭 timing 同步
+
+修改内容：
+- 将 `configs/reachability_gp_isaaclab22_baseline_engineering.yaml` 中 `FDPIRegimeDreamer.Performance.TimingLogEverySteps` 从 `8192` 改为 `0`。
+- 将 128 env 派生配置 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl01_128env.yaml` 的 `TimingLogEverySteps` 同步改为 `0`。
+
+修改原因：
+- `_TrainTimer` 需要 `torch.cuda.synchronize()` 才能准确计时，适合 profiling，但不适合正式长训常开。
+
+影响：
+- 正式 baseline-engineering 系列新 run 默认不再记录 `Timing/*`。
+- 需要 profiling 时仍可通过配置或命令行单独打开 timing。
+
+验证方式：
+- 已通过：配置文件静态检查确认 `TimingLogEverySteps=0`。
+
+相关实验：
+- `experiments/2026-06-12_128环境低KL对偶探索长训/`
+
+---
+
+### CONFIG_CHANGE：新增 128 环境低 KL 对偶探索配置
+
+修改内容：
+- 新增 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl01_128env.yaml`。
+- 该配置继承 `baseline_engineering_dual_kl01`，将 `NumEnvs`、`BatchSize` 和 `ImagineBatchSize` 提高到 `128`。
+- 保留 `TrainModelEverySteps=256`、`TrainAgentEverySteps=256`、`ModelUpdate=4`、`AgentUpdate=4` 和 `Gp/Gd/Dual UpdateSteps=2`，避免重复 fast 配置削弱策略学习的问题。
+- 保留 `DualUpdate.KLCoeff=0.1`，以及 `Gd/DualSampling/DualUpdate StartStep=1000000`。
+
+修改原因：
+- 64 env 版本在 RTX 4090 上仍有 GPU 利用率空间。
+- 用户希望启动环境数更多、硬件利用率更高的训练，同时避免 fast 模式因更新密度下降导致夹取学习变慢。
+
+影响：
+- 默认配置不改变。
+- 新配置会提高单次 rollout 和更新 batch，对显存和更新耗时要求更高；若稳定，可后续再尝试 `BatchSize=256`。
+
+验证方式：
+- 已通过：加载 `configs/reachability_gp_isaaclab22_baseline_engineering_dual_kl01_128env.yaml`，确认 `NumEnvs=128`、`BatchSize=128`、`ImagineBatchSize=128`，且 replay batch 约束满足。
+- 已通过：启动 128 env 长训后确认 IsaacLab 环境数为 `128`，W&B run 为 `riz27lm5`，训练进入 rollout / update 循环，日志未出现 traceback、replay assertion 或 OOM。
+
+相关实验：
+- `experiments/2026-06-12_128环境低KL对偶探索长训/`
+
+---
+
+### EXPERIMENT_ONLY：新增 128 环境低 KL 对偶探索长训入口
+
+修改内容：
+- 新增实验目录 `experiments/2026-06-12_128环境低KL对偶探索长训/`。
+- 新增 `运行命令.sh`、`启动tmux长训.sh`、`配置.yaml`、`参数说明.md`、`实验清单.yaml`、`实验记录.md`、`指标结果.json` 和配置快照。
+
+修改原因：
+- 将 128 env 高利用率训练沉淀为可复现短命令，避免用临时环境变量启动后无法追踪参数。
+
+影响：
+- 可通过 `bash experiments/2026-06-12_128环境低KL对偶探索长训/启动tmux长训.sh` 启动独立 tmux 长训。
+- 输出、日志和 checkpoint 独立保存到该实验目录。
+
+验证方式：
+- 已通过：`bash -n experiments/2026-06-12_128环境低KL对偶探索长训/运行命令.sh experiments/2026-06-12_128环境低KL对偶探索长训/启动tmux长训.sh`。
+- 已通过：tmux 会话 `dual_kl01_128env_long` 已启动并进入训练循环；实验状态和长期索引已更新。
+
+相关实验：
+- `experiments/2026-06-12_128环境低KL对偶探索长训/`
+
+---
+
 ### LOGIC_CHANGE：将 Gd 更新延后到对偶策略启用后
 
 修改内容：

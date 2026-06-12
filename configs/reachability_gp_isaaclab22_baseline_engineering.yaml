@@ -43,7 +43,7 @@ FDPIRegimeDreamer:
     CudnnBenchmark: false
     LogEverySteps: 4096
     DetailedLogEverySteps: 8192
-    TimingLogEverySteps: 8192
+    TimingLogEverySteps: 0
     CacheReplayStarts: true
     UseSampleMany: true
     UseBatchedCriticLatentEncoding: true
